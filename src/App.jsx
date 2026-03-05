@@ -3,7 +3,8 @@ import DashboardOverview from './components/DashboardOverview';
 import ClientForm from './components/ClientForm';
 import PlacementsForecast from './components/PlacementsForecast';
 import Settings from './components/Settings';
-import { getConfig, fetchPricingData, syncClientToAirtable } from './utils/airtableSync';
+import { getConfig as getAirtableConfig, fetchPricingData as fetchAirtablePricing, syncClientToAirtable } from './utils/airtableSync';
+import { getSyncUrl as getGSheetsUrl, fetchPricingData as fetchGSheetsPricing, syncClientToSheet } from './utils/googleSheetsSync';
 import { updateDynamicPricing } from './utils/calculations';
 import { loadProducts, saveProducts } from './components/Settings';
 
@@ -26,11 +27,23 @@ function App() {
   // Attempt to fetch dynamic pricing on app load
   useEffect(() => {
     async function loadPricing() {
-      if (getConfig()) {
+      // 1. Try Google Sheets first (most recent)
+      if (getGSheetsUrl()) {
         try {
-          const data = await fetchPricingData();
+          const data = await fetchGSheetsPricing();
+          if (data) {
+            updateDynamicPricing(data.pricingTiers, data.products);
+            return; // Exit if GSheets succeeds
+          }
+        } catch (e) { console.warn("GSheets fetch failed", e); }
+      }
+
+      // 2. Fallback to Airtable
+      if (getAirtableConfig()) {
+        try {
+          const data = await fetchAirtablePricing();
           if (data) updateDynamicPricing(data.pricingTiers, data.products);
-        } catch (e) { }
+        } catch (e) { console.warn("Airtable fetch failed", e); }
       }
     }
     loadPricing();
@@ -49,8 +62,13 @@ function App() {
     setView('dashboard');
     setEditingClientIndex(null);
 
+    // Sync to Google Sheets if configured
+    if (getGSheetsUrl()) {
+      await syncClientToSheet(clientData);
+    }
+
     // Sync to Airtable if configured
-    if (getConfig()) {
+    if (getAirtableConfig()) {
       await syncClientToAirtable(clientData);
     }
   };

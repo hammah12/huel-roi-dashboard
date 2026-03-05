@@ -8,7 +8,7 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
 
     const productsList = client.products || [client];
     const productNames = productsList.map(p => p.productName).join(', ');
-    const totalStores  = productsList.reduce((sum, p) => sum + (Number(p.numStores) || 0), 0);
+    const totalStores = productsList.reduce((sum, p) => sum + (Number(p.numStores) || 0), 0);
     const totalMachineLocations = huel.numMachines || (client.clientType === 'Vending' ? totalStores : 0);
 
     // Weekly unit assumptions per product, e.g. "7 BE RTD · 14 DG RTD"
@@ -28,12 +28,12 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
     const weeklyBreakdownStr = weeklyUnitBreakdown.map(p => `${p.units % 1 === 0 ? p.units : p.units.toFixed(1)} ${p.label}`).join(' · ');
 
     const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
-    const formatPercent  = (val) => new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1 }).format(val);
+    const formatPercent = (val) => new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1 }).format(val);
 
     // Breakeven bar: cap at 24 months for visual scale
     const breakevenCapped = Math.min(huel.breakevenMonths, 24);
-    const breakevenPct    = Math.round((breakevenCapped / 24) * 100);
-    const isHealthy       = huel.breakevenMonths <= 12 || huel.breakevenMonths === 0;
+    const breakevenPct = Math.round((breakevenCapped / 24) * 100);
+    const isHealthy = huel.breakevenMonths <= 12 || huel.breakevenMonths === 0;
 
     // Vending-specific: revenue share deal?
     const isRevenueShare = huel.isRevenueShare;
@@ -182,20 +182,20 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
 export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemove }) {
     const [isEditMode, setIsEditMode] = useState(false);
     const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
-    const formatPercent  = (val) => new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1 }).format(val);
+    const formatPercent = (val) => new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1 }).format(val);
 
     // Aggregate calculations
     const totalRevenue = clients.reduce((sum, c) => sum + calculateROI(c).huel.year1GrossRevenue, 0);
-    const totalProfit  = clients.reduce((sum, c) => sum + calculateROI(c).huel.year1GrossProfit,  0);
-    const totalTrade   = clients.reduce((sum, c) => sum + calculateROI(c).huel.totalTradeExpenses, 0);
-    const totalEbitda  = clients.reduce((sum, c) => sum + calculateROI(c).huel.year1Ebitda,        0);
+    const totalProfit = clients.reduce((sum, c) => sum + calculateROI(c).huel.year1GrossProfit, 0);
+    const totalTrade = clients.reduce((sum, c) => sum + calculateROI(c).huel.totalTradeExpenses, 0);
+    const totalEbitda = clients.reduce((sum, c) => sum + calculateROI(c).huel.year1Ebitda, 0);
     const portfolioEbitdaPct = totalRevenue > 0 ? totalEbitda / totalRevenue : 0;
 
     const kpiCards = [
-        { label: 'Yr 1 Gross Revenue', value: formatCurrency(totalRevenue), accent: 'var(--huel-blue)',  valueClass: '' },
-        { label: 'Yr 1 Gross Profit',  value: formatCurrency(totalProfit),  accent: 'var(--huel-green)', valueClass: 'text-success' },
-        { label: 'Total Trade Spend',  value: formatCurrency(totalTrade),   accent: 'var(--huel-pink)',  valueClass: 'text-danger' },
-        { label: 'Portfolio EBITDA',   value: `${formatCurrency(totalEbitda)} (${formatPercent(portfolioEbitdaPct)})`, accent: totalEbitda >= 0 ? 'var(--huel-blue)' : 'var(--huel-pink)', valueClass: totalEbitda >= 0 ? 'text-success' : 'text-danger' },
+        { label: 'Yr 1 Gross Revenue', value: formatCurrency(totalRevenue), accent: 'var(--huel-blue)', valueClass: '' },
+        { label: 'Yr 1 Gross Profit', value: formatCurrency(totalProfit), accent: 'var(--huel-green)', valueClass: 'text-success' },
+        { label: 'Total Trade Spend', value: formatCurrency(totalTrade), accent: 'var(--huel-pink)', valueClass: 'text-danger' },
+        { label: 'Portfolio EBITDA', value: `${formatCurrency(totalEbitda)} (${formatPercent(portfolioEbitdaPct)})`, accent: totalEbitda >= 0 ? 'var(--huel-blue)' : 'var(--huel-pink)', valueClass: totalEbitda >= 0 ? 'text-success' : 'text-danger' },
     ];
 
     return (
@@ -224,6 +224,35 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                         <p className={`font-bold ${kpi.valueClass}`} style={{ fontSize: '1.25rem', color: 'var(--huel-dark)' }}>{kpi.value}</p>
                     </div>
                 ))}
+            </div>
+
+            {/* Annual Units by Type breakdown */}
+            <div className="glass-card mb-8">
+                <div className="kpi-card-accent" style={{ background: 'var(--huel-blue)' }} />
+                <h3 style={{ marginBottom: '1.25rem', color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Annual Forecasted Units by Type
+                </h3>
+                <div className="grid grid-cols-3" style={{ gap: '2rem' }}>
+                    {['Vending', 'Airport Concessions', 'Food Service'].map(type => {
+                        const unitsForType = clients
+                            .filter(c => (c.clientType || 'Vending') === type)
+                            .reduce((sum, c) => {
+                                const roi = calculateROI(c);
+                                return sum + (roi.huel.annualUnits || 0);
+                            }, 0);
+                        return (
+                            <div key={type} style={{ borderLeft: '3px solid var(--border-light)', paddingLeft: '1.25rem' }}>
+                                <p className="form-label" style={{ marginBottom: '4px' }}>{type}</p>
+                                <p className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--huel-dark)' }}>
+                                    {unitsForType.toLocaleString()}
+                                </p>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                    annual units
+                                </p>
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
 
             <AnalyticsCharts clients={clients} />
