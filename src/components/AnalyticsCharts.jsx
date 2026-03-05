@@ -16,8 +16,9 @@ import {
 const C = { blue: '#0056B3', green: '#E1F8E0', greenBar: '#6BBF7F', pink: '#D95C7A', gray: '#8C8C8C', dark: '#0B0B0B', light: '#F5F5F5' };
 const SEG_COLORS = [C.blue, C.pink, C.gray, '#4a90d9'];
 
-const formatK  = (val) => Math.abs(val) >= 1000 ? `$${(val / 1000).toFixed(0)}k` : `$${val}`;
-const fmtPct   = (val) => `${(val * 100).toFixed(1)}%`;
+const formatK = (val) => Math.abs(val) >= 1000 ? `$${(val / 1000).toFixed(0)}k` : `$${val}`;
+const formatUnits = (val) => Math.abs(val) >= 1000 ? `${(val / 1000).toFixed(1)}k` : val.toLocaleString();
+const fmtPct = (val) => `${(val * 100).toFixed(1)}%`;
 const axisStyle = { fill: '#8C8C8C', fontSize: 11, fontFamily: 'Helvetica, Arial, sans-serif' };
 const legendStyle = { paddingTop: '12px', fontSize: '0.75rem', fontFamily: 'Helvetica' };
 
@@ -58,16 +59,16 @@ function groupBy(clients, field) {
         const key = client[field] || 'Unknown';
         const roi = calculateROI(client);
         if (!map[key]) map[key] = { name: key, Revenue: 0, 'Gross Profit': 0, 'Trade Spend': 0, count: 0 };
-        map[key].Revenue       += roi.huel.year1GrossRevenue;
-        map[key]['Gross Profit']+= roi.huel.year1GrossProfit;
+        map[key].Revenue += roi.huel.year1GrossRevenue;
+        map[key]['Gross Profit'] += roi.huel.year1GrossProfit;
         map[key]['Trade Spend'] += roi.huel.totalTradeExpenses;
-        map[key].count          += 1;
+        map[key].count += 1;
     });
     return Object.values(map).map(d => ({
         ...d,
-        Revenue:        Math.round(d.Revenue),
+        Revenue: Math.round(d.Revenue),
         'Gross Profit': Math.round(d['Gross Profit']),
-        'Trade Spend':  Math.round(d['Trade Spend']),
+        'Trade Spend': Math.round(d['Trade Spend']),
     }));
 }
 
@@ -88,37 +89,37 @@ export default function AnalyticsCharts({ clients }) {
         const roi = calculateROI(client);
         return {
             name: client.retailerName,
-            Revenue:        Math.round(roi.huel.year1GrossRevenue),
+            Revenue: Math.round(roi.huel.year1GrossRevenue),
             'Gross Profit': Math.round(roi.huel.year1GrossProfit),
         };
     });
 
     const tradeData = clients.map(client => {
         const prods = client.products || [client];
-        const sf  = Math.round(prods.reduce((s, p) => s + (Number(p.slottingFixed) || 0), 0));
-        const ff  = Math.round(prods.reduce((s, p) => s + (Number(p.slottingFreeFillQty) || 0) * 2.85, 0));
-        const tp  = Math.round(prods.reduce((s, p) => s + (Number(p.tprs) || 0), 0));
-        const mk  = Math.round(prods.reduce((s, p) => s + (Number(p.marketing) || 0), 0));
+        const sf = Math.round(prods.reduce((s, p) => s + (Number(p.slottingFixed) || 0), 0));
+        const ff = Math.round(prods.reduce((s, p) => s + (Number(p.slottingFreeFillQty) || 0) * 2.85, 0));
+        const tp = Math.round(prods.reduce((s, p) => s + (Number(p.tprs) || 0), 0));
+        const mk = Math.round(prods.reduce((s, p) => s + (Number(p.marketing) || 0), 0));
         return {
             name: client.retailerName,
             'Slotting Fixed': sf,
-            'Free Fill':      ff,
-            'TPRs':           tp,
-            'Marketing':      mk,
-            '_total':         sf + ff + tp + mk,
+            'Free Fill': ff,
+            'TPRs': tp,
+            'Marketing': mk,
+            '_total': sf + ff + tp + mk,
         };
     });
 
     // ── Segment data ──────────────────────────────────────────────
     const byClientType = groupBy(clients, 'clientType');
-    const byRTM        = groupBy(clients, 'routeToMarket');
+    const byRTM = groupBy(clients, 'routeToMarket');
 
     // ── Efficiency scatter: stores (x) vs gross margin % (y), bubble = revenue ──
     const scatterData = clients.map(client => {
-        const roi  = calculateROI(client);
+        const roi = calculateROI(client);
         const prods = client.products || [client];
         const totalStores = prods.reduce((s, p) => s + (Number(p.numStores) || 0), 0);
-        const marginPct   = roi.huel.year1GrossRevenue > 0
+        const marginPct = roi.huel.year1GrossRevenue > 0
             ? roi.huel.year1GrossProfit / roi.huel.year1GrossRevenue
             : 0;
         return {
@@ -131,7 +132,20 @@ export default function AnalyticsCharts({ clients }) {
 
     // ── Pie: revenue share by client type ────────────────────────
     const totalRev = byClientType.reduce((s, d) => s + d.Revenue, 0);
-    const pieData  = byClientType.map(d => ({ name: d.name, value: d.Revenue }));
+    const pieData = byClientType.map(d => ({ name: d.name, value: d.Revenue }));
+
+    // ── Units by product aggregate ────────────────────────────────
+    const unitsByProduct = Array.from(new Set(clients.flatMap(c => (c.products || [c]).map(p => p.productName))))
+        .map(prodName => {
+            const units = clients.reduce((sum, c) => {
+                const products = c.products || [c];
+                return sum + products
+                    .filter(p => p.productName === prodName)
+                    .reduce((s, p) => s + (Number(p.numStores) || 0) * (Number(p.baseVelocity) || 0) * 52, 0);
+            }, 0);
+            return { name: prodName, Units: Math.round(units) };
+        })
+        .sort((a, b) => b.Units - a.Units);
 
     return (
         <div style={{ marginBottom: '2rem' }}>
@@ -149,10 +163,10 @@ export default function AnalyticsCharts({ clients }) {
                             <YAxis tickFormatter={formatK} tick={axisStyle} axisLine={false} tickLine={false} />
                             <Tooltip content={<ChartTooltip />} cursor={{ fill: C.light }} />
                             <Legend wrapperStyle={legendStyle} />
-                            <Bar dataKey="Revenue" fill={C.blue} radius={[2,2,0,0]}>
+                            <Bar dataKey="Revenue" fill={C.blue} radius={[2, 2, 0, 0]}>
                                 <LabelList dataKey="Revenue" position="top" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
                             </Bar>
-                            <Bar dataKey="Gross Profit" fill={C.greenBar} radius={[2,2,0,0]}>
+                            <Bar dataKey="Gross Profit" fill={C.greenBar} radius={[2, 2, 0, 0]}>
                                 <LabelList dataKey="Gross Profit" position="top" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
                             </Bar>
                         </BarChart>
@@ -169,9 +183,9 @@ export default function AnalyticsCharts({ clients }) {
                             <Tooltip content={<ChartTooltip />} cursor={{ fill: C.light }} />
                             <Legend wrapperStyle={legendStyle} />
                             <Bar dataKey="Slotting Fixed" stackId="a" fill={C.blue} />
-                            <Bar dataKey="Free Fill"      stackId="a" fill={C.gray} />
-                            <Bar dataKey="TPRs"           stackId="a" fill={C.pink} />
-                            <Bar dataKey="Marketing"      stackId="a" fill={C.greenBar} radius={[2,2,0,0]} />
+                            <Bar dataKey="Free Fill" stackId="a" fill={C.gray} />
+                            <Bar dataKey="TPRs" stackId="a" fill={C.pink} />
+                            <Bar dataKey="Marketing" stackId="a" fill={C.greenBar} radius={[2, 2, 0, 0]} />
                             {/* Transparent bar carries the stack total label */}
                             <Bar dataKey="_total" stackId="b" fill="transparent" legendType="none">
                                 <LabelList dataKey="_total" position="top" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
@@ -196,10 +210,10 @@ export default function AnalyticsCharts({ clients }) {
                             <YAxis type="category" dataKey="name" tick={axisStyle} axisLine={false} tickLine={false} width={120} />
                             <Tooltip content={<ChartTooltip />} cursor={{ fill: C.light }} />
                             <Legend wrapperStyle={legendStyle} />
-                            <Bar dataKey="Revenue" fill={C.blue} radius={[0,2,2,0]}>
+                            <Bar dataKey="Revenue" fill={C.blue} radius={[0, 2, 2, 0]}>
                                 <LabelList dataKey="Revenue" position="right" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
                             </Bar>
-                            <Bar dataKey="Gross Profit" fill={C.greenBar} radius={[0,2,2,0]}>
+                            <Bar dataKey="Gross Profit" fill={C.greenBar} radius={[0, 2, 2, 0]}>
                                 <LabelList dataKey="Gross Profit" position="right" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
                             </Bar>
                         </BarChart>
@@ -240,29 +254,22 @@ export default function AnalyticsCharts({ clients }) {
                 </div>
             </div>
 
-            {/* ── Row 3: RTM + Efficiency ──────────────────────── */}
-            <SectionLabel>Route to Market & Efficiency</SectionLabel>
+            {/* ── Row 3: Product Units & Efficiency ────────────── */}
+            <SectionLabel>Product Units & Efficiency</SectionLabel>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
 
-                {/* RTM horizontal bar */}
+                {/* Units by product horizontal bar */}
                 <div className="glass-card">
-                    <h3 style={{ marginBottom: '0.5rem', color: C.dark }}>Revenue by Route to Market</h3>
-                    <p style={{ fontSize: '0.75rem', marginBottom: '1rem' }}>Revenue, Profit & Trade Spend by RTM channel</p>
+                    <h3 style={{ marginBottom: '0.5rem', color: C.dark }}>Annual Units by Product</h3>
+                    <p style={{ fontSize: '0.75rem', marginBottom: '1rem' }}>Total forecasted units per SKU</p>
                     <ResponsiveContainer width="100%" height={240}>
-                        <BarChart data={byRTM} layout="vertical" margin={{ top: 4, right: 70, left: 8, bottom: 4 }} barGap={4}>
+                        <BarChart data={unitsByProduct} layout="vertical" margin={{ top: 4, right: 70, left: 8, bottom: 4 }}>
                             <CartesianGrid strokeDasharray="0" horizontal={false} stroke={C.light} />
-                            <XAxis type="number" tickFormatter={formatK} tick={axisStyle} axisLine={false} tickLine={false} />
+                            <XAxis type="number" tickFormatter={formatUnits} tick={axisStyle} axisLine={false} tickLine={false} />
                             <YAxis type="category" dataKey="name" tick={axisStyle} axisLine={false} tickLine={false} width={110} />
-                            <Tooltip content={<ChartTooltip />} cursor={{ fill: C.light }} />
-                            <Legend wrapperStyle={legendStyle} />
-                            <Bar dataKey="Revenue" fill={C.blue} radius={[0,2,2,0]}>
-                                <LabelList dataKey="Revenue" position="right" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
-                            </Bar>
-                            <Bar dataKey="Gross Profit" fill={C.greenBar} radius={[0,2,2,0]}>
-                                <LabelList dataKey="Gross Profit" position="right" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
-                            </Bar>
-                            <Bar dataKey="Trade Spend" fill={C.pink} radius={[0,2,2,0]}>
-                                <LabelList dataKey="Trade Spend" position="right" formatter={formatK} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
+                            <Tooltip content={<ChartTooltip formatter={(val) => val.toLocaleString()} />} cursor={{ fill: C.light }} />
+                            <Bar dataKey="Units" fill={C.greenBar} radius={[0, 2, 2, 0]}>
+                                <LabelList dataKey="Units" position="right" formatter={formatUnits} style={{ fontSize: 10, fill: C.dark, fontFamily: 'Helvetica', fontWeight: 600 }} />
                             </Bar>
                         </BarChart>
                     </ResponsiveContainer>

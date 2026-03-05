@@ -83,11 +83,14 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
                     <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '0.75rem' }}>{totalStores.toLocaleString()}</p>
 
                     <p className="form-label" style={{ marginBottom: '2px' }}>Weekly Units</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '2px' }}>{totalWeeklyUnits % 1 === 0 ? totalWeeklyUnits : totalWeeklyUnits.toFixed(1)}</p>
+                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '2px' }}>{totalWeeklyUnits % 1 === 0 ? totalWeeklyUnits.toLocaleString() : totalWeeklyUnits.toFixed(1).toLocaleString()}</p>
                     {weeklyUnitBreakdown.length > 1 && (
                         <p style={{ fontSize: '0.7rem', color: 'var(--huel-mid-gray)', marginBottom: '0.75rem' }}>{weeklyBreakdownStr}</p>
                     )}
-                    {weeklyUnitBreakdown.length === 1 && <div style={{ marginBottom: '0.75rem' }} />}
+                    {weeklyUnitBreakdown.length <= 1 && <div style={{ marginBottom: '0.75rem' }} />}
+
+                    <p className="form-label" style={{ marginBottom: '2px' }}>Annual Units</p>
+                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '0.75rem' }}>{(huel.annualUnits || 0).toLocaleString()}</p>
 
                     <p className="form-label" style={{ marginBottom: '2px' }}>Trade Rate</p>
                     <p className="font-bold" style={{ color: 'var(--huel-dark)' }}>{formatPercent(huel.tradeRatePercent)}</p>
@@ -227,31 +230,52 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
             </div>
 
             {/* Annual Units by Type breakdown */}
-            <div className="glass-card mb-8">
-                <div className="kpi-card-accent" style={{ background: 'var(--huel-blue)' }} />
-                <h3 style={{ marginBottom: '1.25rem', color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Annual Forecasted Units by Type
-                </h3>
-                <div className="grid grid-cols-3" style={{ gap: '2rem' }}>
-                    {['Vending', 'Airport Concessions', 'Food Service'].map(type => {
-                        const unitsForType = clients
-                            .filter(c => (c.clientType || 'Vending') === type)
-                            .reduce((sum, c) => {
-                                const roi = calculateROI(c);
-                                return sum + (roi.huel.annualUnits || 0);
+            <div className="grid grid-cols-2 gap-6 mb-8">
+                <div className="glass-card">
+                    <div className="kpi-card-accent" style={{ background: 'var(--huel-blue)' }} />
+                    <h3 style={{ marginBottom: '1.25rem', color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Annual Units by Type
+                    </h3>
+                    <div className="grid grid-cols-1" style={{ gap: '1rem' }}>
+                        {['Vending', 'Airport Concessions', 'Food Service'].map(type => {
+                            const unitsForType = clients
+                                .filter(c => (c.clientType || 'Vending') === type)
+                                .reduce((sum, c) => sum + (calculateROI(c).huel.annualUnits || 0), 0);
+                            return (
+                                <div key={type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
+                                    <span className="form-label" style={{ margin: 0 }}>{type}</span>
+                                    <span className="font-bold" style={{ fontSize: '1.1rem', color: 'var(--huel-dark)' }}>
+                                        {unitsForType.toLocaleString()}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <div className="glass-card">
+                    <div className="kpi-card-accent" style={{ background: 'var(--huel-green)' }} />
+                    <h3 style={{ marginBottom: '1.25rem', color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Annual Units by Product
+                    </h3>
+                    <div className="grid grid-cols-1" style={{ gap: '1rem' }}>
+                        {(clients.length > 0 ? Array.from(new Set(clients.flatMap(c => (c.products || [c]).map(p => p.productName)))) : []).map(prodName => {
+                            const unitsForProd = clients.reduce((sum, c) => {
+                                const products = c.products || [c];
+                                return sum + products
+                                    .filter(p => p.productName === prodName)
+                                    .reduce((s, p) => s + (Number(p.numStores) || 0) * (Number(p.baseVelocity) || 0) * 52, 0);
                             }, 0);
-                        return (
-                            <div key={type} style={{ borderLeft: '3px solid var(--border-light)', paddingLeft: '1.25rem' }}>
-                                <p className="form-label" style={{ marginBottom: '4px' }}>{type}</p>
-                                <p className="font-bold" style={{ fontSize: '1.5rem', color: 'var(--huel-dark)' }}>
-                                    {unitsForType.toLocaleString()}
-                                </p>
-                                <p style={{ fontSize: '0.7rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                    annual units
-                                </p>
-                            </div>
-                        );
-                    })}
+                            return (
+                                <div key={prodName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
+                                    <span className="form-label" style={{ margin: 0 }}>{prodName}</span>
+                                    <span className="font-bold" style={{ fontSize: '1.1rem', color: 'var(--huel-dark)' }}>
+                                        {unitsForProd.toLocaleString()}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
 
