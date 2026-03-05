@@ -89,8 +89,8 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
                     )}
                     {weeklyUnitBreakdown.length <= 1 && <div style={{ marginBottom: '0.75rem' }} />}
 
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Annual Units</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '0.75rem' }}>{(huel.annualUnits || 0).toLocaleString()}</p>
+                    <p className="form-label" style={{ marginBottom: '2px' }}>Monthly Units</p>
+                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '0.75rem' }}>{(Math.round((huel.annualUnits || 0) / 12)).toLocaleString()}</p>
 
                     <p className="form-label" style={{ marginBottom: '2px' }}>Trade Rate</p>
                     <p className="font-bold" style={{ color: 'var(--huel-dark)' }}>{formatPercent(huel.tradeRatePercent)}</p>
@@ -234,7 +234,7 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                 <div className="glass-card">
                     <div className="kpi-card-accent" style={{ background: 'var(--huel-blue)' }} />
                     <h3 style={{ marginBottom: '1.25rem', color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Annual Units by Type
+                        Monthly Units by Type
                     </h3>
                     <div className="grid grid-cols-1" style={{ gap: '1rem' }}>
                         {['Vending', 'Airport Concessions', 'Food Service'].map(type => {
@@ -245,7 +245,7 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                                 <div key={type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
                                     <span className="form-label" style={{ margin: 0 }}>{type}</span>
                                     <span className="font-bold" style={{ fontSize: '1.1rem', color: 'var(--huel-dark)' }}>
-                                        {unitsForType.toLocaleString()}
+                                        {Math.round(unitsForType / 12).toLocaleString()}
                                     </span>
                                 </div>
                             );
@@ -256,7 +256,7 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                 <div className="glass-card">
                     <div className="kpi-card-accent" style={{ background: 'var(--huel-green)' }} />
                     <h3 style={{ marginBottom: '1.25rem', color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Annual Units by Product
+                        Monthly Units by Product
                     </h3>
                     <div className="grid grid-cols-1" style={{ gap: '1rem' }}>
                         {(clients.length > 0 ? Array.from(new Set(clients.flatMap(c => (c.products || [c]).map(p => p.productName)))) : []).map(prodName => {
@@ -270,7 +270,7 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                                 <div key={prodName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
                                     <span className="form-label" style={{ margin: 0 }}>{prodName}</span>
                                     <span className="font-bold" style={{ fontSize: '1.1rem', color: 'var(--huel-dark)' }}>
-                                        {unitsForProd.toLocaleString()}
+                                        {Math.round(unitsForProd / 12).toLocaleString()}
                                     </span>
                                 </div>
                             );

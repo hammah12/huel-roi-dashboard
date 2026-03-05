@@ -143,7 +143,7 @@ export default function AnalyticsCharts({ clients }) {
                     .filter(p => p.productName === prodName)
                     .reduce((s, p) => s + (Number(p.numStores) || 0) * (Number(p.baseVelocity) || 0) * 52, 0);
             }, 0);
-            return { name: prodName, Units: Math.round(units) };
+            return { name: prodName, Units: Math.round(units / 12) };
         })
         .sort((a, b) => b.Units - a.Units);
 
@@ -260,8 +260,8 @@ export default function AnalyticsCharts({ clients }) {
 
                 {/* Units by product horizontal bar */}
                 <div className="glass-card">
-                    <h3 style={{ marginBottom: '0.5rem', color: C.dark }}>Annual Units by Product</h3>
-                    <p style={{ fontSize: '0.75rem', marginBottom: '1rem' }}>Total forecasted units per SKU</p>
+                    <h3 style={{ marginBottom: '0.5rem', color: C.dark }}>Monthly Units by Product</h3>
+                    <p style={{ fontSize: '0.75rem', marginBottom: '1rem' }}>Total forecasted monthly units per SKU</p>
                     <ResponsiveContainer width="100%" height={240}>
                         <BarChart data={unitsByProduct} layout="vertical" margin={{ top: 4, right: 70, left: 8, bottom: 4 }}>
                             <CartesianGrid strokeDasharray="0" horizontal={false} stroke={C.light} />
