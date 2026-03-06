@@ -38,6 +38,15 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
     // Vending-specific: revenue share deal?
     const isRevenueShare = huel.isRevenueShare;
 
+    // Pipeline status badge config
+    const statusConfig = {
+        'Closed':        { label: 'Closed', bg: '#1a7f4b', color: '#fff' },
+        'Hot Pipeline':  { label: 'Hot Pipeline', bg: 'var(--huel-pink)', color: '#fff' },
+        'High Interest': { label: 'High Interest', bg: 'var(--huel-blue)', color: '#fff' },
+        'Prospect':      { label: 'Prospect', bg: '#888', color: '#fff' },
+    };
+    const statusBadge = statusConfig[client.pipelineStatus] || null;
+
     // Reusable stat row style
     const statRow = { marginBottom: '0.85rem' };
     const statLabel = { marginBottom: '2px' };
@@ -61,14 +70,19 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
                         </div>
                     )}
                 </div>
-                {/* Type · RTM · Rev Share badge */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                {/* Type · Rev Share · Pipeline Status badges */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
                     <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        {client.clientType || 'Vending'} · {client.routeToMarket}
+                        {client.clientType || 'Vending'}
                     </span>
                     {isRevenueShare && (
                         <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 6px', background: 'var(--huel-blue)', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                             Rev Share
+                        </span>
+                    )}
+                    {statusBadge && (
+                        <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', background: statusBadge.bg, color: statusBadge.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            {statusBadge.label}
                         </span>
                     )}
                 </div>
@@ -218,8 +232,16 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
     );
 }
 
+// Filter options for the retailer breakdown
+const FILTERS = [
+    { key: 'all',      label: 'All' },
+    { key: 'live',     label: 'Live',    match: ['Closed'] },
+    { key: 'pipeline', label: 'Pipeline', match: ['Hot Pipeline', 'High Interest', 'Prospect'] },
+];
+
 export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemove }) {
     const [isEditMode, setIsEditMode] = useState(false);
+    const [activeFilter, setActiveFilter] = useState('all');
     const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
     const formatPercent = (val) => new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1 }).format(val);
 
@@ -317,28 +339,85 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
 
             <AnalyticsCharts clients={clients} />
 
-            <h2 className="mb-4">Retailer Breakdown</h2>
+            {/* ── Retailer Breakdown header + filter bar ─────────────── */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <h2 style={{ margin: 0 }}>Retailer Breakdown</h2>
+                <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border-light)' }}>
+                    {FILTERS.map((f, i) => {
+                        const count = f.key === 'all'
+                            ? clients.length
+                            : clients.filter(c => (f.match || []).includes(c.pipelineStatus || 'Prospect')).length;
+                        const isActive = activeFilter === f.key;
+                        return (
+                            <button
+                                key={f.key}
+                                onClick={() => setActiveFilter(f.key)}
+                                style={{
+                                    padding: '0.4rem 0.9rem',
+                                    fontSize: '0.75rem',
+                                    fontFamily: 'var(--font-heading)',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.05em',
+                                    border: 'none',
+                                    borderRight: i < FILTERS.length - 1 ? '1px solid var(--border-light)' : 'none',
+                                    cursor: 'pointer',
+                                    background: isActive ? 'var(--huel-dark)' : 'transparent',
+                                    color: isActive ? '#fff' : 'var(--huel-mid-gray)',
+                                    transition: 'background 0.15s',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                }}
+                            >
+                                {f.label}
+                                <span style={{
+                                    fontSize: '0.65rem',
+                                    padding: '1px 5px',
+                                    background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--huel-light-gray)',
+                                    color: isActive ? '#fff' : 'var(--huel-mid-gray)',
+                                    fontWeight: 700,
+                                }}>
+                                    {count}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
 
-            {clients.length === 0 ? (
-                <div className="glass-card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-                    <h2>No Retailers Added Yet</h2>
-                    <p>Get started by adding a new retailer configuration to see the ROI projections here.</p>
-                </div>
-            ) : (
-                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
-                    {clients.map((client, index) => (
-                        <DashboardCard
-                            key={index}
-                            index={index}
-                            client={client}
-                            isEditMode={isEditMode}
-                            onEdit={onEdit}
-                            onDuplicate={onDuplicate}
-                            onRemove={onRemove}
-                        />
-                    ))}
-                </div>
-            )}
+            {(() => {
+                const filter = FILTERS.find(f => f.key === activeFilter);
+                const visibleClients = activeFilter === 'all'
+                    ? clients
+                    : clients.filter(c => (filter.match || []).includes(c.pipelineStatus || 'Prospect'));
+
+                return visibleClients.length === 0 ? (
+                    <div className="glass-card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+                        {clients.length === 0
+                            ? <><h2>No Retailers Added Yet</h2><p>Get started by adding a new retailer configuration.</p></>
+                            : <p style={{ color: 'var(--huel-mid-gray)' }}>No accounts match this filter.</p>
+                        }
+                    </div>
+                ) : (
+                    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
+                        {visibleClients.map((client) => {
+                            const index = clients.indexOf(client);
+                            return (
+                                <DashboardCard
+                                    key={index}
+                                    index={index}
+                                    client={client}
+                                    isEditMode={isEditMode}
+                                    onEdit={onEdit}
+                                    onDuplicate={onDuplicate}
+                                    onRemove={onRemove}
+                                />
+                            );
+                        })}
+                    </div>
+                );
+            })()}
         </div>
     );
 }
