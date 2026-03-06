@@ -5,12 +5,6 @@ import AnalyticsCharts from './AnalyticsCharts';
 // ── Client types (shared across components) ──────────────────────────────────
 const CLIENT_TYPES = ['Vending', 'Micromarket', 'Airport Concessions', 'Food Service'];
 
-// ── Filter config ─────────────────────────────────────────────────────────────
-const FILTERS = [
-    { key: 'all',      label: 'All' },
-    { key: 'live',     label: 'Live',     match: ['Closed'] },
-    { key: 'pipeline', label: 'Pipeline', match: ['Hot Pipeline', 'High Interest', 'Prospect'] },
-];
 
 // ── Shared formatters ─────────────────────────────────────────────────────────
 const fmtCurrency = (val) =>
@@ -33,121 +27,6 @@ const STATUS_CONFIG = {
     'High Interest': { label: 'High Interest', bg: 'var(--huel-blue)', color: '#fff' },
     'Prospect':      { label: 'Prospect',      bg: '#888', color: '#fff' },
 };
-
-// ── LeadCard ─────────────────────────────────────────────────────────────────
-function LeadCard({ client, index, isEditMode, onEdit, onRemove, onConvert }) {
-    const roi = calculateROI(client);
-    const { huel } = roi;
-
-    const productsList = client.products || [client];
-    const productNames = productsList.map(p => p.productName).join(', ');
-    const totalStores = getClientLocations(client);
-    const statusBadge = STATUS_CONFIG[client.pipelineStatus] || STATUS_CONFIG['Prospect'];
-
-    return (
-        <div
-            className="glass-card"
-            style={{
-                padding: '1rem 1.25rem',
-                borderTop: '3px solid var(--border-light)',
-            }}
-        >
-            {/* Header row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.65rem' }}>
-                <div>
-                    <h3 style={{ margin: 0, marginBottom: '4px', fontSize: '0.95rem', color: 'var(--huel-dark)' }}>
-                        {client.retailerName}
-                    </h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.68rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            {client.clientType || 'Vending'}
-                        </span>
-                        <span style={{
-                            fontSize: '0.65rem', fontWeight: 700,
-                            padding: '2px 8px',
-                            background: statusBadge.bg, color: statusBadge.color,
-                            textTransform: 'uppercase', letterSpacing: '0.04em',
-                        }}>
-                            {statusBadge.label}
-                        </span>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
-                            {productNames}
-                        </span>
-                    </div>
-                </div>
-                <button
-                    onClick={() => onConvert(index)}
-                    style={{
-                        padding: '0.4rem 1rem',
-                        fontSize: '0.72rem',
-                        fontFamily: 'var(--font-heading)',
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em',
-                        background: '#1a7f4b',
-                        color: '#fff',
-                        border: 'none',
-                        cursor: 'pointer',
-                        flexShrink: 0,
-                        marginLeft: '0.75rem',
-                    }}
-                >
-                    Convert →
-                </button>
-            </div>
-
-            {/* Stats row */}
-            <div style={{
-                display: 'flex',
-                gap: '1.5rem',
-                borderTop: '1px solid var(--border-light)',
-                paddingTop: '0.65rem',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-            }}>
-                <div>
-                    <p className="form-label" style={{ margin: '0 0 2px' }}>Locations</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', margin: 0 }}>
-                        {totalStores.toLocaleString()}
-                    </p>
-                </div>
-                <div>
-                    <p className="form-label" style={{ margin: '0 0 2px' }}>Est. Yr 1 Revenue</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', margin: 0 }}>
-                        {fmtCurrency(huel.year1GrossRevenue)}
-                    </p>
-                </div>
-                <div>
-                    <p className="form-label" style={{ margin: '0 0 2px' }}>Est. EBITDA</p>
-                    <p className={`font-bold ${huel.year1Ebitda >= 0 ? 'text-success' : 'text-danger'}`} style={{ margin: 0 }}>
-                        {fmtCurrency(huel.year1Ebitda)}
-                    </p>
-                </div>
-                <div>
-                    <p className="form-label" style={{ margin: '0 0 2px' }}>Trade Rate</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', margin: 0 }}>
-                        {fmtPercent(huel.tradeRatePercent)}
-                    </p>
-                </div>
-
-                {isEditMode && (
-                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
-                        <button
-                            className="btn btn-secondary"
-                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.65rem' }}
-                            onClick={() => onEdit(index)}
-                        >Edit</button>
-                        <button
-                            className="btn btn-secondary"
-                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.65rem', color: 'var(--huel-pink)' }}
-                            onClick={() => onRemove(index)}
-                        >Delete</button>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
 
 // ── DashboardCard ─────────────────────────────────────────────────────────────
 function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemove }) {
@@ -344,48 +223,37 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemove, onConvert }) {
+export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemove }) {
     const [isEditMode, setIsEditMode] = useState(false);
-    const [activeFilter, setActiveFilter] = useState('all');
 
-    // Split into live vs leads
-    const liveClients  = clients.filter(c => c.pipelineStatus === 'Closed');
-    const leadClients  = clients.filter(c => c.pipelineStatus !== 'Closed');
+    // Dashboard only shows live (Closed) accounts — pipeline lives in Placements Forecast
+    const liveClients = clients.filter(c => c.pipelineStatus === 'Closed');
+    const pipelineCount = clients.filter(c => c.pipelineStatus !== 'Closed').length;
 
-    // Filter-aware client set for KPI cards
-    const filteredForKPI = activeFilter === 'live'
-        ? liveClients
-        : activeFilter === 'pipeline'
-        ? leadClients
-        : clients;
-
-    // KPI aggregates (filter-aware)
-    const totalRevenue = filteredForKPI.reduce((sum, c) => sum + calculateROI(c).huel.year1GrossRevenue, 0);
-    const totalProfit  = filteredForKPI.reduce((sum, c) => sum + calculateROI(c).huel.year1GrossProfit,  0);
-    const totalTrade   = filteredForKPI.reduce((sum, c) => sum + calculateROI(c).huel.totalTradeExpenses, 0);
-    const totalEbitda  = filteredForKPI.reduce((sum, c) => sum + calculateROI(c).huel.year1Ebitda,       0);
+    // KPI aggregates — live accounts only
+    const totalRevenue = liveClients.reduce((sum, c) => sum + calculateROI(c).huel.year1GrossRevenue, 0);
+    const totalProfit  = liveClients.reduce((sum, c) => sum + calculateROI(c).huel.year1GrossProfit,  0);
+    const totalTrade   = liveClients.reduce((sum, c) => sum + calculateROI(c).huel.totalTradeExpenses, 0);
+    const totalEbitda  = liveClients.reduce((sum, c) => sum + calculateROI(c).huel.year1Ebitda,       0);
     const portfolioEbitdaPct = totalRevenue > 0 ? totalEbitda / totalRevenue : 0;
 
-    // KPI label suffix so user knows what the numbers represent
-    const kpiLabel = activeFilter === 'live' ? '(Live)' : activeFilter === 'pipeline' ? '(Pipeline)' : '(All)';
-
     const kpiCards = [
-        { label: `Yr 1 Gross Revenue ${kpiLabel}`, value: fmtCurrency(totalRevenue),  accent: 'var(--huel-blue)',  valueClass: '' },
-        { label: `Yr 1 Gross Profit ${kpiLabel}`,  value: fmtCurrency(totalProfit),   accent: 'var(--huel-green)', valueClass: 'text-success' },
-        { label: `Total Trade Spend ${kpiLabel}`,   value: fmtCurrency(totalTrade),    accent: 'var(--huel-pink)',  valueClass: 'text-danger' },
+        { label: 'Yr 1 Gross Revenue',  value: fmtCurrency(totalRevenue),  accent: 'var(--huel-blue)',  valueClass: '' },
+        { label: 'Yr 1 Gross Profit',   value: fmtCurrency(totalProfit),   accent: 'var(--huel-green)', valueClass: 'text-success' },
+        { label: 'Total Trade Spend',    value: fmtCurrency(totalTrade),    accent: 'var(--huel-pink)',  valueClass: 'text-danger' },
         {
-            label: `Portfolio EBITDA ${kpiLabel}`,
+            label: 'Portfolio EBITDA',
             value: `${fmtCurrency(totalEbitda)} (${fmtPercent(portfolioEbitdaPct)})`,
             accent: totalEbitda >= 0 ? 'var(--huel-blue)' : 'var(--huel-pink)',
             valueClass: totalEbitda >= 0 ? 'text-success' : 'text-danger'
         },
     ];
 
-    // Location summary — ALWAYS from live (Closed) clients only
-    const totalLiveLocations    = liveClients.reduce((sum, c) => sum + getClientLocations(c), 0);
-    const vendingLocations      = liveClients.filter(c => (c.clientType || 'Vending') === 'Vending').reduce((sum, c) => sum + getClientLocations(c), 0);
-    const micromarketLocations  = liveClients.filter(c => c.clientType === 'Micromarket').reduce((sum, c) => sum + getClientLocations(c), 0);
-    const concessionLocations   = liveClients.filter(c => c.clientType === 'Airport Concessions').reduce((sum, c) => sum + getClientLocations(c), 0);
+    // Location summary cards
+    const totalLiveLocations   = liveClients.reduce((sum, c) => sum + getClientLocations(c), 0);
+    const vendingLocations     = liveClients.filter(c => (c.clientType || 'Vending') === 'Vending').reduce((sum, c) => sum + getClientLocations(c), 0);
+    const micromarketLocations = liveClients.filter(c => c.clientType === 'Micromarket').reduce((sum, c) => sum + getClientLocations(c), 0);
+    const concessionLocations  = liveClients.filter(c => c.clientType === 'Airport Concessions').reduce((sum, c) => sum + getClientLocations(c), 0);
 
     const locationCards = [
         { label: 'Total Live Locations',  value: totalLiveLocations,   accent: '#1a7f4b' },
@@ -394,10 +262,6 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
         { label: 'Concession Locations',  value: concessionLocations,   accent: 'var(--huel-pink)' },
     ];
 
-    // What to show in retailer breakdown section
-    const showLiveSection  = activeFilter === 'all' || activeFilter === 'live';
-    const showLeadsSection = activeFilter === 'all' || activeFilter === 'pipeline';
-
     return (
         <div>
             {/* ── Header ─────────────────────────────────────────────────── */}
@@ -405,7 +269,10 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                 <div>
                     <h1 style={{ marginBottom: '4px' }}>Master Dashboard</h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--huel-mid-gray)' }}>
-                        {liveClients.length} live · {leadClients.length} in pipeline
+                        {liveClients.length} live account{liveClients.length !== 1 ? 's' : ''}
+                        {pipelineCount > 0 && (
+                            <span style={{ color: 'var(--huel-mid-gray)' }}> · {pipelineCount} in pipeline — see Placements Forecast</span>
+                        )}
                     </p>
                 </div>
                 <button
@@ -416,12 +283,10 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                 </button>
             </div>
 
-            {/* ── Location Summary (always live data) ────────────────────── */}
-            <div style={{ marginBottom: '0.5rem' }}>
-                <p style={{ fontSize: '0.68rem', fontFamily: 'var(--font-heading)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--huel-mid-gray)', marginBottom: '0.6rem' }}>
-                    Live Footprint
-                </p>
-            </div>
+            {/* ── Location Summary ────────────────────────────────────────── */}
+            <p style={{ fontSize: '0.68rem', fontFamily: 'var(--font-heading)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--huel-mid-gray)', marginBottom: '0.6rem' }}>
+                Live Footprint
+            </p>
             <div className="grid grid-cols-4 mb-8">
                 {locationCards.map((card) => (
                     <div key={card.label} className="glass-card" style={{ padding: '1rem 1.25rem' }}>
@@ -437,7 +302,7 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
                 ))}
             </div>
 
-            {/* ── KPI Cards (filter-aware) ────────────────────────────────── */}
+            {/* ── KPI Cards ───────────────────────────────────────────────── */}
             <div className="grid grid-cols-4 mb-8">
                 {kpiCards.map((kpi) => (
                     <div key={kpi.label} className="glass-card" style={{ padding: '1.25rem' }}>
@@ -506,139 +371,33 @@ export default function DashboardOverview({ clients, onEdit, onDuplicate, onRemo
 
             <AnalyticsCharts clients={liveClients} />
 
-            {/* ── Retailer Breakdown header + filter bar ──────────────────── */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                <h2 style={{ margin: 0 }}>Retailer Breakdown</h2>
-                <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border-light)' }}>
-                    {FILTERS.map((f, i) => {
-                        const count = f.key === 'all'
-                            ? clients.length
-                            : f.key === 'live'
-                            ? liveClients.length
-                            : leadClients.length;
-                        const isActive = activeFilter === f.key;
+            {/* ── Retailer Breakdown ──────────────────────────────────────── */}
+            <h2 style={{ marginBottom: '1.25rem' }}>Retailer Breakdown</h2>
+
+            {liveClients.length === 0 ? (
+                <div className="glass-card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+                    <h2 style={{ marginBottom: '0.5rem' }}>No Live Accounts Yet</h2>
+                    <p style={{ color: 'var(--huel-mid-gray)' }}>
+                        Add a retailer with status <strong>Closed</strong>, or convert a pipeline lead in <strong>Placements Forecast</strong>.
+                    </p>
+                </div>
+            ) : (
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
+                    {liveClients.map((client) => {
+                        const index = clients.indexOf(client);
                         return (
-                            <button
-                                key={f.key}
-                                onClick={() => setActiveFilter(f.key)}
-                                style={{
-                                    padding: '0.4rem 0.9rem',
-                                    fontSize: '0.75rem',
-                                    fontFamily: 'var(--font-heading)',
-                                    fontWeight: 700,
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.05em',
-                                    border: 'none',
-                                    borderRight: i < FILTERS.length - 1 ? '1px solid var(--border-light)' : 'none',
-                                    cursor: 'pointer',
-                                    background: isActive ? 'var(--huel-dark)' : 'transparent',
-                                    color: isActive ? '#fff' : 'var(--huel-mid-gray)',
-                                    transition: 'background 0.15s',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '5px',
-                                }}
-                            >
-                                {f.label}
-                                <span style={{
-                                    fontSize: '0.65rem',
-                                    padding: '1px 5px',
-                                    background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--huel-light-gray)',
-                                    color: isActive ? '#fff' : 'var(--huel-mid-gray)',
-                                    fontWeight: 700,
-                                }}>
-                                    {count}
-                                </span>
-                            </button>
+                            <DashboardCard
+                                key={index}
+                                index={index}
+                                client={client}
+                                isEditMode={isEditMode}
+                                onEdit={onEdit}
+                                onDuplicate={onDuplicate}
+                                onRemove={onRemove}
+                            />
                         );
                     })}
                 </div>
-            </div>
-
-            {clients.length === 0 ? (
-                <div className="glass-card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-                    <h2>No Retailers Added Yet</h2>
-                    <p>Get started by adding a new retailer configuration.</p>
-                </div>
-            ) : (
-                <>
-                    {/* ── Live accounts ─────────────────────────────────────── */}
-                    {showLiveSection && (
-                        <>
-                            {activeFilter === 'all' && liveClients.length > 0 && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                                    <p style={{ fontSize: '0.68rem', fontFamily: 'var(--font-heading)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#1a7f4b', margin: 0 }}>
-                                        Live Accounts
-                                    </p>
-                                    <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }} />
-                                    <span style={{ fontSize: '0.68rem', color: 'var(--huel-mid-gray)' }}>{liveClients.length}</span>
-                                </div>
-                            )}
-                            {liveClients.length === 0 && activeFilter !== 'all' ? (
-                                <div className="glass-card" style={{ textAlign: 'center', padding: '2rem', marginBottom: '1.5rem' }}>
-                                    <p style={{ color: 'var(--huel-mid-gray)' }}>No live accounts yet.</p>
-                                </div>
-                            ) : (
-                                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: leadClients.length > 0 && showLeadsSection ? '2.5rem' : 0 }}>
-                                    {liveClients.map((client) => {
-                                        const index = clients.indexOf(client);
-                                        return (
-                                            <DashboardCard
-                                                key={index}
-                                                index={index}
-                                                client={client}
-                                                isEditMode={isEditMode}
-                                                onEdit={onEdit}
-                                                onDuplicate={onDuplicate}
-                                                onRemove={onRemove}
-                                            />
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </>
-                    )}
-
-                    {/* ── Leads section ─────────────────────────────────────── */}
-                    {showLeadsSection && leadClients.length > 0 && (
-                        <>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                                <p style={{ fontSize: '0.68rem', fontFamily: 'var(--font-heading)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--huel-mid-gray)', margin: 0 }}>
-                                    Pipeline Leads
-                                </p>
-                                <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }} />
-                                <span style={{
-                                    fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px',
-                                    background: 'var(--huel-light-gray)', color: 'var(--huel-mid-gray)',
-                                }}>
-                                    {leadClients.length} {leadClients.length === 1 ? 'account' : 'accounts'} — click Convert → to move to Live
-                                </span>
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                {leadClients.map((client) => {
-                                    const index = clients.indexOf(client);
-                                    return (
-                                        <LeadCard
-                                            key={index}
-                                            index={index}
-                                            client={client}
-                                            isEditMode={isEditMode}
-                                            onEdit={onEdit}
-                                            onRemove={onRemove}
-                                            onConvert={onConvert}
-                                        />
-                                    );
-                                })}
-                            </div>
-                        </>
-                    )}
-
-                    {showLeadsSection && leadClients.length === 0 && activeFilter === 'pipeline' && (
-                        <div className="glass-card" style={{ textAlign: 'center', padding: '2rem' }}>
-                            <p style={{ color: 'var(--huel-mid-gray)' }}>No pipeline leads. Add an account with a pipeline status to see it here.</p>
-                        </div>
-                    )}
-                </>
             )}
         </div>
     );
