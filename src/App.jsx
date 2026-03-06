@@ -183,7 +183,10 @@ function App() {
         )}
 
         {view === 'placements' && (
-          <PlacementsForecast />
+          <PlacementsForecast
+            clients={clients}
+            onConvert={handleConvertLead}
+          />
         )}
 
         {view === 'settings' && (

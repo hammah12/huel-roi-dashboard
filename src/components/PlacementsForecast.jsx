@@ -3,13 +3,21 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid,
     Tooltip, Legend, ResponsiveContainer, LabelList
 } from 'recharts';
+import { calculateROI } from '../utils/calculations';
 
-const TYPES = ['Vending', 'Airport Concessions', 'Food Service'];
+const TYPES = ['Vending', 'Micromarket', 'Airport Concessions', 'Food Service'];
 
 const TYPE_COLORS = {
     'Vending':             '#0056B3',
+    'Micromarket':         '#7b4fbf',
     'Airport Concessions': '#D95C7A',
     'Food Service':        '#6BBF7F',
+};
+
+const PIPELINE_STATUS_CONFIG = {
+    'Hot Pipeline':  { label: 'Hot Pipeline',  bg: '#D95C7A',  color: '#fff' },
+    'High Interest': { label: 'High Interest', bg: '#0056B3',  color: '#fff' },
+    'Prospect':      { label: 'Prospect',      bg: '#888888',  color: '#fff' },
 };
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
@@ -44,14 +52,18 @@ const tdStyle = (align) => ({
     verticalAlign: 'middle',
 });
 
+const fmtCurrency = (val) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
+
 // ── Main Component ──────────────────────────────────────────────────────────
-export default function PlacementsForecast() {
+export default function PlacementsForecast({ clients = [], onConvert }) {
     const [rows, setRows] = useState(() => {
         const saved = localStorage.getItem('placementsForecast');
         return saved ? JSON.parse(saved) : [];
     });
 
     const [isEditing, setIsEditing] = useState(false);
+    const [pipelineFilter, setPipelineFilter] = useState('all');
 
     const persist = (newRows) => {
         setRows(newRows);
@@ -77,7 +89,29 @@ export default function PlacementsForecast() {
 
     const removeRow = (id) => persist(rows.filter(r => r.id !== id));
 
-    // ── Derived data ──────────────────────────────────────────────────
+    // ── Pipeline leads (non-Closed clients) ──────────────────────────────
+    const leadClients = clients.filter(c => c.pipelineStatus !== 'Closed');
+
+    const PIPELINE_STATUS_ORDER = ['Hot Pipeline', 'High Interest', 'Prospect'];
+    const sortedLeads = [...leadClients].sort((a, b) => {
+        const ai = PIPELINE_STATUS_ORDER.indexOf(a.pipelineStatus ?? 'Prospect');
+        const bi = PIPELINE_STATUS_ORDER.indexOf(b.pipelineStatus ?? 'Prospect');
+        return ai - bi;
+    });
+
+    const filteredLeads = pipelineFilter === 'all'
+        ? sortedLeads
+        : sortedLeads.filter(c => c.pipelineStatus === pipelineFilter);
+
+    // Forecast quarter for a lead (from placementsForecast rows)
+    const getForecastQuarter = (clientName) => {
+        const row = rows.find(r => r.partner?.toLowerCase() === clientName?.toLowerCase());
+        if (!row) return null;
+        const bestQ = QUARTERS.reduce((best, q) => (!best || (row[q] || 0) > (row[best] || 0) ? q : best), null);
+        return bestQ && row[bestQ] > 0 ? bestQ : null;
+    };
+
+    // ── Derived data ──────────────────────────────────────────────────────
     const rowTotal = (r) => QUARTERS.reduce((s, q) => s + (r[q] || 0), 0);
     const annualTotal = rows.reduce((s, r) => s + rowTotal(r), 0);
 
@@ -86,7 +120,6 @@ export default function PlacementsForecast() {
         ...rows.flatMap(r => QUARTERS.map(q => r[q] || 0))
     );
 
-    // Quarterly summary data for bar chart
     const chartData = QUARTERS.map(q => {
         const point = { quarter: `${q}\n${QUARTER_LABELS[q]}`, q };
         TYPES.forEach(t => {
@@ -98,6 +131,12 @@ export default function PlacementsForecast() {
 
     const qTotals = QUARTERS.map(q => rows.reduce((s, r) => s + (r[q] || 0), 0));
 
+    // Pipeline filter pill counts
+    const pipelineStatusCounts = PIPELINE_STATUS_ORDER.reduce((acc, status) => {
+        acc[status] = leadClients.filter(c => c.pipelineStatus === status).length;
+        return acc;
+    }, {});
+
     return (
         <div>
             {/* ── Header ─────────────────────────────────────────────────── */}
@@ -105,7 +144,8 @@ export default function PlacementsForecast() {
                 <div>
                     <h1 style={{ marginBottom: '4px' }}>Placements Forecast</h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--huel-mid-gray)' }}>
-                        {rows.length} partner{rows.length !== 1 ? 's' : ''} · {annualTotal} total placements planned for the year
+                        {rows.length} partner{rows.length !== 1 ? 's' : ''} · {annualTotal} total placements planned
+                        {leadClients.length > 0 && ` · ${leadClients.length} lead${leadClients.length !== 1 ? 's' : ''} in pipeline`}
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -123,7 +163,251 @@ export default function PlacementsForecast() {
                 </div>
             </div>
 
+            {/* ── Pipeline Leads Section ─────────────────────────────────── */}
+            {leadClients.length > 0 && (
+                <div style={{ marginBottom: '2.5rem' }}>
+                    {/* Section header */}
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '1rem',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <h2 style={{ margin: 0, fontSize: '1rem' }}>Pipeline Leads</h2>
+                            <span style={{
+                                fontSize: '0.65rem', fontWeight: 700,
+                                padding: '3px 9px',
+                                background: 'var(--huel-dark)', color: '#fff',
+                                textTransform: 'uppercase', letterSpacing: '0.06em',
+                            }}>
+                                {leadClients.length} account{leadClients.length !== 1 ? 's' : ''}
+                            </span>
+                        </div>
+
+                        {/* Status filter pills */}
+                        <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border-light)' }}>
+                            {[{ key: 'all', label: 'All', count: leadClients.length }, ...PIPELINE_STATUS_ORDER.map(s => ({ key: s, label: s, count: pipelineStatusCounts[s] }))].map((item, i, arr) => {
+                                const isActive = pipelineFilter === item.key;
+                                const cfg = PIPELINE_STATUS_CONFIG[item.key];
+                                return (
+                                    <button
+                                        key={item.key}
+                                        onClick={() => setPipelineFilter(item.key)}
+                                        style={{
+                                            padding: '0.3rem 0.7rem',
+                                            fontSize: '0.7rem',
+                                            fontFamily: 'var(--font-heading)',
+                                            fontWeight: 700,
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.04em',
+                                            border: 'none',
+                                            borderRight: i < arr.length - 1 ? '1px solid var(--border-light)' : 'none',
+                                            cursor: 'pointer',
+                                            background: isActive ? (cfg?.bg || 'var(--huel-dark)') : 'transparent',
+                                            color: isActive ? (cfg?.color || '#fff') : 'var(--huel-mid-gray)',
+                                            transition: 'background 0.15s',
+                                            display: 'flex', alignItems: 'center', gap: '4px',
+                                        }}
+                                    >
+                                        {item.label}
+                                        {item.count > 0 && (
+                                            <span style={{
+                                                fontSize: '0.6rem', padding: '1px 4px',
+                                                background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--huel-light-gray)',
+                                                color: isActive ? '#fff' : 'var(--huel-mid-gray)',
+                                            }}>
+                                                {item.count}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Lead cards table */}
+                    <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Helvetica Neue, sans-serif' }}>
+                            <thead>
+                                <tr style={{ background: 'var(--huel-light-gray)' }}>
+                                    <th style={thStyle('left', '22%')}>Account</th>
+                                    <th style={thStyle('left', '12%')}>Status</th>
+                                    <th style={thStyle('left', '12%')}>Type</th>
+                                    <th style={thStyle('center', '9%')}>Locations</th>
+                                    <th style={thStyle('right', '14%')}>Est. Yr 1 Rev</th>
+                                    <th style={thStyle('right', '14%')}>Est. EBITDA</th>
+                                    <th style={thStyle('center', '9%')}>Forecast Q</th>
+                                    <th style={thStyle('center', '8%')} />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredLeads.map((client, i) => {
+                                    const globalIndex = clients.indexOf(client);
+                                    const roi = calculateROI(client);
+                                    const { huel } = roi;
+                                    const products = client.products || [client];
+                                    const locations = Math.max(...products.map(p => Number(p.numStores) || 0), 0);
+                                    const statusCfg = PIPELINE_STATUS_CONFIG[client.pipelineStatus] || PIPELINE_STATUS_CONFIG['Prospect'];
+                                    const typeBg = TYPE_COLORS[client.clientType] || TYPE_COLORS['Vending'];
+                                    const forecastQ = getForecastQuarter(client.retailerName);
+                                    const isPositiveEbitda = huel.year1Ebitda >= 0;
+
+                                    return (
+                                        <tr
+                                            key={globalIndex}
+                                            style={{
+                                                borderBottom: '1px solid var(--border-light)',
+                                                background: i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.013)',
+                                                transition: 'background 0.1s',
+                                            }}
+                                        >
+                                            {/* Account name */}
+                                            <td style={{ ...tdStyle('left'), fontWeight: 600, color: 'var(--huel-dark)' }}>
+                                                {client.retailerName}
+                                            </td>
+
+                                            {/* Pipeline status */}
+                                            <td style={tdStyle('left')}>
+                                                <span style={{
+                                                    fontSize: '0.62rem', fontWeight: 700,
+                                                    padding: '2px 7px',
+                                                    background: statusCfg.bg, color: statusCfg.color,
+                                                    textTransform: 'uppercase', letterSpacing: '0.04em',
+                                                    whiteSpace: 'nowrap',
+                                                }}>
+                                                    {statusCfg.label}
+                                                </span>
+                                            </td>
+
+                                            {/* Client type */}
+                                            <td style={tdStyle('left')}>
+                                                <span style={{
+                                                    fontSize: '0.62rem', fontWeight: 700,
+                                                    padding: '2px 7px',
+                                                    background: typeBg, color: '#fff',
+                                                    textTransform: 'uppercase', letterSpacing: '0.04em',
+                                                    whiteSpace: 'nowrap',
+                                                }}>
+                                                    {client.clientType || 'Vending'}
+                                                </span>
+                                            </td>
+
+                                            {/* Locations */}
+                                            <td style={{ ...tdStyle('center'), fontWeight: 700, color: 'var(--huel-dark)' }}>
+                                                {locations.toLocaleString()}
+                                            </td>
+
+                                            {/* Est. Revenue */}
+                                            <td style={{ ...tdStyle('right'), fontWeight: 700, color: 'var(--huel-dark)' }}>
+                                                {fmtCurrency(huel.year1GrossRevenue)}
+                                            </td>
+
+                                            {/* Est. EBITDA */}
+                                            <td style={{
+                                                ...tdStyle('right'),
+                                                fontWeight: 700,
+                                                color: isPositiveEbitda ? '#1a7f4b' : '#D95C7A',
+                                            }}>
+                                                {fmtCurrency(huel.year1Ebitda)}
+                                            </td>
+
+                                            {/* Forecast quarter */}
+                                            <td style={{ ...tdStyle('center') }}>
+                                                {forecastQ ? (
+                                                    <span style={{
+                                                        fontSize: '0.72rem', fontWeight: 700,
+                                                        padding: '2px 8px',
+                                                        background: 'rgba(0,86,179,0.1)',
+                                                        color: 'var(--huel-blue)',
+                                                        letterSpacing: '0.03em',
+                                                    }}>
+                                                        {forecastQ}
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ color: 'var(--border-light)', fontSize: '0.9rem' }}>—</span>
+                                                )}
+                                            </td>
+
+                                            {/* Convert button */}
+                                            <td style={{ ...tdStyle('center'), paddingRight: '0.85rem' }}>
+                                                <button
+                                                    onClick={() => onConvert && onConvert(globalIndex)}
+                                                    title="Mark as closed and move to live dashboard"
+                                                    style={{
+                                                        padding: '0.3rem 0.75rem',
+                                                        fontSize: '0.68rem',
+                                                        fontFamily: 'var(--font-heading)',
+                                                        fontWeight: 700,
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.05em',
+                                                        background: '#1a7f4b',
+                                                        color: '#fff',
+                                                        border: 'none',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap',
+                                                        transition: 'opacity 0.15s',
+                                                    }}
+                                                    onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                                                    onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                                                >
+                                                    Close Deal →
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+
+                            {/* Summary footer */}
+                            <tfoot>
+                                <tr style={{ background: 'rgba(0,0,0,0.03)', borderTop: '2px solid var(--border-light)' }}>
+                                    <td colSpan={4} style={{ ...tdStyle('left'), fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--huel-mid-gray)' }}>
+                                        Pipeline Total ({filteredLeads.length} account{filteredLeads.length !== 1 ? 's' : ''})
+                                    </td>
+                                    <td style={{ ...tdStyle('right'), fontWeight: 800, color: 'var(--huel-dark)' }}>
+                                        {fmtCurrency(filteredLeads.reduce((s, c) => s + calculateROI(c).huel.year1GrossRevenue, 0))}
+                                    </td>
+                                    <td style={{
+                                        ...tdStyle('right'),
+                                        fontWeight: 800,
+                                        color: filteredLeads.reduce((s, c) => s + calculateROI(c).huel.year1Ebitda, 0) >= 0 ? '#1a7f4b' : '#D95C7A',
+                                    }}>
+                                        {fmtCurrency(filteredLeads.reduce((s, c) => s + calculateROI(c).huel.year1Ebitda, 0))}
+                                    </td>
+                                    <td colSpan={2} />
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+
+                    {/* Explanatory note */}
+                    <p style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', marginTop: '0.6rem', fontStyle: 'italic' }}>
+                        Click <strong>Close Deal →</strong> to mark an account as live — it will appear in the main dashboard. The forecast entry above will remain.
+                    </p>
+                </div>
+            )}
+
+            {leadClients.length === 0 && (
+                <div style={{
+                    marginBottom: '2rem',
+                    padding: '1.25rem 1.5rem',
+                    background: 'var(--huel-light-gray)',
+                    border: '1px dashed var(--border-light)',
+                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--huel-mid-gray)' }}>
+                        No pipeline leads yet. Add a retailer with a pipeline status (Hot Pipeline, High Interest, or Prospect) to track them here.
+                    </span>
+                </div>
+            )}
+
             {/* ── KPI Quarter Cards ────────────────────────────────────── */}
+            <div style={{ marginBottom: '0.5rem' }}>
+                <p style={{ fontSize: '0.68rem', fontFamily: 'var(--font-heading)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--huel-mid-gray)', marginBottom: '0.6rem' }}>
+                    Placement Forecast
+                </p>
+            </div>
             <div className="grid grid-cols-4 mb-8">
                 {QUARTERS.map((q, i) => (
                     <div key={q} className="glass-card" style={{ padding: '1.25rem' }}>
@@ -291,7 +575,6 @@ export default function PlacementsForecast() {
                                                             />
                                                         ) : count > 0 ? (
                                                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                                                                {/* Gantt bar */}
                                                                 <div style={{
                                                                     height: '6px',
                                                                     width: `${barPct}%`,
