@@ -21,7 +21,12 @@ export function updateDynamicPricing(pricingData, productData) {
 
 export function calculateROI(clientData) {
   const productsList = clientData.products || [clientData];
-  const huelUnitPrice = PRICING_TIERS[clientData.routeToMarket] || 2.85;
+
+  // RTM is now per-product; keep a fallback for legacy top-level routeToMarket
+  const legacyRtm = clientData.routeToMarket || 'DSD';
+
+  // Account-level rebate — stored as a % of Huel gross revenue
+  const rebatePct = Number(clientData.rebate) / 100 || 0;
 
   // Vending revenue-share deal flag
   const isRevenueShare =
@@ -45,6 +50,9 @@ export function calculateROI(clientData) {
 
   productsList.forEach(prod => {
     const productDef = PRODUCTS[prod.productName] || PRODUCTS["Huel BE RTD"];
+
+    // Per-product RTM price (falls back to legacy top-level RTM)
+    const huelUnitPrice = PRICING_TIERS[prod.routeToMarket || legacyRtm] || 2.85;
 
     const stores = Number(prod.numStores) || 0;
     const velocity = Number(prod.baseVelocity) || 0;
@@ -95,15 +103,15 @@ export function calculateROI(clientData) {
       partnerPayout = Math.max(revenueShareMin, splitAmount);
     }
 
-    // ── Trade Expenses ───────────────────────────────────────────────
+    // ── Trade Expenses (rebate calculated after loop on total revenue) ──
     const freeFillValue = Number(prod.slottingFreeFillQty || 0) * huelUnitPrice;
     const tradeExpenses =
       Number(prod.slottingFixed || 0) +
       freeFillValue +
       Number(prod.tprs || 0) +
       Number(prod.marketing || 0) +
-      machineCost + // machine capex (first product only)
-      partnerPayout;  // partner revenue share payout
+      machineCost +    // machine capex (first product only)
+      partnerPayout;   // partner revenue share payout (first product only)
 
     totalYear1GrossRevenue += year1GrossRevenue;
     totalYear1GrossProfit += year1GrossProfit;
@@ -119,6 +127,10 @@ export function calculateROI(clientData) {
     totalRetailerYear1Revenue += retailerYear1Revenue;
     totalRetailerCost += retailerCost;
   });
+
+  // Rebate = % of total gross revenue, added to trade costs after loop
+  const totalRebate = totalYear1GrossRevenue * rebatePct;
+  totalTradeExpenses += totalRebate;
 
   const totalYear1Ebitda = totalYear1GrossProfit - totalTradeExpenses;
   const ebitdaMarginPercent = totalYear1GrossRevenue > 0
@@ -145,6 +157,8 @@ export function calculateROI(clientData) {
       totalTradeExpenses,
       totalMachineCost,
       totalPartnerPayout,
+      totalRebate,
+      rebatePct,
       numMachines: Number(clientData.numMachines) || 0,
       annualUnits: totalAnnualUnitsAcrossProducts,
       year1Ebitda: totalYear1Ebitda,

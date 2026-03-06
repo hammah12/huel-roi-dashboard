@@ -7,6 +7,7 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
 
     const emptyProduct = {
         productName: productList[0]?.name || 'Huel BE RTD',
+        routeToMarket: 'DSD',
         numStores: '',
         baseVelocity: '',
         srp: '',
@@ -19,7 +20,7 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
     const [formData, setFormData] = useState({
         retailerName: '',
         clientType: 'Vending',
-        routeToMarket: 'DSD',
+        rebate: '',
         dealType: 'standard',
         numMachines: '',
         machineCostPerUnit: '',
@@ -30,29 +31,35 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
 
     useEffect(() => {
         if (initialData) {
+            // Legacy: top-level routeToMarket — migrate down to each product
+            const legacyRtm = initialData.routeToMarket || 'DSD';
             if (initialData.products) {
-                // Ensure existing clients have the new vending fields
                 setFormData({
                     dealType: 'standard',
                     numMachines: '',
                     machineCostPerUnit: '',
                     revenueSharePct: '',
                     revenueShareMin: '',
+                    rebate: '',
                     ...initialData,
-                    products: initialData.products.map(({ machineCostPerUnit: _mc, ...p }) => p)
+                    products: initialData.products.map(({ machineCostPerUnit: _mc, ...p }) => ({
+                        ...p,
+                        // If product doesn't have its own RTM yet, inherit from top-level
+                        routeToMarket: p.routeToMarket || legacyRtm,
+                    })),
                 });
             } else {
-                const { retailerName, routeToMarket, clientType, ...productData } = initialData;
+                const { retailerName, routeToMarket: _rtm, clientType, ...productData } = initialData;
                 setFormData({
                     retailerName,
-                    routeToMarket,
                     clientType: clientType || 'Vending',
+                    rebate: '',
                     dealType: 'standard',
                     numMachines: '',
                     machineCostPerUnit: '',
                     revenueSharePct: '',
                     revenueShareMin: '',
-                    products: [{ ...productData }]
+                    products: [{ routeToMarket: legacyRtm, ...productData }],
                 });
             }
         }
@@ -153,13 +160,21 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
                             </select>
                         </div>
                         <div>
-                            <label className="form-label">Route to Market</label>
-                            <select name="routeToMarket" value={formData.routeToMarket} onChange={handleGeneralChange} className="form-select">
-                                <option value="DSD">DSD ($2.39)</option>
-                                <option value="Distributor">Distributor ($2.52)</option>
-                                <option value="Direct to Retailer">Direct to Retailer Wholesale ($2.85)</option>
-                                <option value="Wholesale">Wholesale ($3.00)</option>
-                            </select>
+                            <label className="form-label">Partner Rebate (%)</label>
+                            <input
+                                type="number"
+                                name="rebate"
+                                value={formData.rebate}
+                                onChange={handleGeneralChange}
+                                className="form-input"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                placeholder="e.g. 5"
+                            />
+                            <small style={{ display: 'block', marginTop: '4px', fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
+                                % of Huel's gross revenue paid back to partner as a rebate.
+                            </small>
                         </div>
                     </div>
                 </div>
@@ -292,7 +307,8 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
 
                             <h4 className="mb-4" style={{ color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.8rem' }}>Product Setup {index + 1}</h4>
 
-                            <div className="grid grid-cols-2 gap-4 mb-6">
+                            {/* Row 1: Product · RTM · Locations */}
+                            <div className="grid gap-4 mb-4" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
                                 <div>
                                     <label className="form-label">RTD Product</label>
                                     <select name="productName" value={product.productName} onChange={(e) => handleProductChange(index, e)} className="form-select">
@@ -302,7 +318,16 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="form-label">{isVending ? 'Number of Vending Locations' : 'Number of Stores'}</label>
+                                    <label className="form-label">Route to Market</label>
+                                    <select name="routeToMarket" value={product.routeToMarket || 'DSD'} onChange={(e) => handleProductChange(index, e)} className="form-select">
+                                        <option value="DSD">DSD</option>
+                                        <option value="Distributor">Distributor</option>
+                                        <option value="Direct to Retailer">Direct to Retailer</option>
+                                        <option value="Wholesale">Wholesale</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="form-label">{isVending ? 'Vending Locations' : 'Stores'}</label>
                                     <input
                                         type="number"
                                         name="numStores"
@@ -313,6 +338,9 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
                                         required
                                     />
                                 </div>
+                            </div>
+                            {/* Row 2: Velocity · SRP */}
+                            <div className="grid grid-cols-2 gap-4 mb-6">
                                 <div>
                                     <label className="form-label">Base Velocity (Units/Location/Wk)</label>
                                     <input

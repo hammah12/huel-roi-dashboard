@@ -175,6 +175,18 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
                     </div>
                 )}
 
+                {/* Rebate row (conditional) */}
+                {huel.totalRebate > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Partner Rebate ({formatPercent(huel.rebatePct)})
+                        </span>
+                        <span style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--huel-pink)' }}>
+                            −{formatCurrency(huel.totalRebate)}
+                        </span>
+                    </div>
+                )}
+
                 {/* Retailer margin + breakeven on one row */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
