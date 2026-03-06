@@ -20,6 +20,7 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
     const [formData, setFormData] = useState({
         retailerName: '',
         clientType: 'Vending',
+        pipelineStatus: 'Prospect',
         rebate: '',
         dealType: 'standard',
         numMachines: '',
@@ -41,6 +42,7 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
                     revenueSharePct: '',
                     revenueShareMin: '',
                     rebate: '',
+                    pipelineStatus: 'Prospect',
                     ...initialData,
                     products: initialData.products.map(({ machineCostPerUnit: _mc, ...p }) => ({
                         ...p,
@@ -53,6 +55,7 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
                 setFormData({
                     retailerName,
                     clientType: clientType || 'Vending',
+                    pipelineStatus: 'Prospect',
                     rebate: '',
                     dealType: 'standard',
                     numMachines: '',
@@ -138,23 +141,33 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
                 {/* ── 1. General Information ──────────────────────────────────── */}
                 <div className="form-group mb-6">
                     <h3 className="mb-4">1. General Information</h3>
-                    <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem' }}>
+                    <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
                         <div>
-                            <label className="form-label">Retailer Name</label>
+                            <label className="form-label">Retailer / Account Name</label>
                             <input
                                 type="text"
                                 name="retailerName"
                                 value={formData.retailerName}
                                 onChange={handleGeneralChange}
                                 className="form-input"
-                                placeholder="e.g. Target"
+                                placeholder="e.g. SFO Airport"
                                 required
                             />
+                        </div>
+                        <div>
+                            <label className="form-label">Pipeline Status</label>
+                            <select name="pipelineStatus" value={formData.pipelineStatus} onChange={handleGeneralChange} className="form-select">
+                                <option value="Closed">Closed / Immediate</option>
+                                <option value="Hot Pipeline">Hot Pipeline</option>
+                                <option value="High Interest">High Interest</option>
+                                <option value="Prospect">Prospect</option>
+                            </select>
                         </div>
                         <div>
                             <label className="form-label">Client Type</label>
                             <select name="clientType" value={formData.clientType} onChange={handleGeneralChange} className="form-select">
                                 <option value="Vending">Vending</option>
+                                <option value="Micromarket">Micromarket</option>
                                 <option value="Airport Concessions">Airport Concessions</option>
                                 <option value="Food Service">Food Service</option>
                             </select>

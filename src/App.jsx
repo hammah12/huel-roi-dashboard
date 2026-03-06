@@ -93,6 +93,13 @@ function App() {
     }
   };
 
+  const handleConvertLead = (index) => {
+    const newClients = [...clients];
+    newClients[index] = { ...newClients[index], pipelineStatus: 'Closed' };
+    setClients(newClients);
+    localStorage.setItem('huelClients', JSON.stringify(newClients));
+  };
+
   const handleCancel = () => {
     setView('dashboard');
     setEditingClientIndex(null);
@@ -162,6 +169,7 @@ function App() {
             onEdit={handleEditClient}
             onDuplicate={handleDuplicateClient}
             onRemove={handleRemoveClient}
+            onConvert={handleConvertLead}
           />
         )}
 
