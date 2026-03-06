@@ -38,144 +38,168 @@ function DashboardCard({ client, index, isEditMode, onEdit, onDuplicate, onRemov
     // Vending-specific: revenue share deal?
     const isRevenueShare = huel.isRevenueShare;
 
+    // Reusable stat row style
+    const statRow = { marginBottom: '0.85rem' };
+    const statLabel = { marginBottom: '2px' };
+
     return (
-        <div className="glass-card">
-            {/* Colour accent strip at top */}
+        <div className="glass-card" style={{ padding: '1.25rem' }}>
+            {/* Colour accent strip */}
             <div className="kpi-card-accent" style={{ background: isHealthy ? 'var(--huel-green)' : 'var(--huel-pink)' }} />
 
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.75rem' }}>
-                <div>
-                    <h3 style={{ color: 'var(--huel-dark)', margin: 0, marginBottom: '4px' }}>
+            {/* ── Header ───────────────────────────────────────────────── */}
+            <div style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <h3 style={{ color: 'var(--huel-dark)', margin: 0, marginBottom: '5px' }}>
                         {client.retailerName}
                     </h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            {client.clientType || 'Vending'} · {client.routeToMarket}
+                    {isEditMode && (
+                        <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, marginLeft: '0.5rem' }}>
+                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem' }} onClick={() => onEdit(index)}>Edit</button>
+                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem' }} onClick={() => onDuplicate(index)}>Copy</button>
+                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem', color: 'var(--huel-pink)' }} onClick={() => onRemove(index)}>Delete</button>
+                        </div>
+                    )}
+                </div>
+                {/* Type · RTM · Rev Share badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        {client.clientType || 'Vending'} · {client.routeToMarket}
+                    </span>
+                    {isRevenueShare && (
+                        <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 6px', background: 'var(--huel-blue)', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Rev Share
                         </span>
-                        {isRevenueShare && (
-                            <span style={{
-                                fontSize: '0.65rem', fontWeight: 700, padding: '2px 6px',
-                                background: 'var(--huel-blue)', color: '#fff',
-                                textTransform: 'uppercase', letterSpacing: '0.04em'
-                            }}>
-                                Rev Share
-                            </span>
+                    )}
+                </div>
+                {/* Products as a subtle tag line */}
+                <p style={{ margin: '5px 0 0', fontSize: '0.75rem', color: 'var(--huel-dark)', fontWeight: 600 }}>
+                    {productNames}
+                </p>
+            </div>
+
+            {/* ── Core metrics (2 col) ─────────────────────────────────── */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1.5rem', marginBottom: '1rem' }}>
+
+                {/* Left — volume stats */}
+                <div>
+                    <div style={statRow}>
+                        <p className="form-label" style={statLabel}>{client.clientType === 'Vending' ? 'Locations' : 'Stores'}</p>
+                        <p className="font-bold" style={{ color: 'var(--huel-dark)' }}>{totalStores.toLocaleString()}</p>
+                    </div>
+
+                    <div style={statRow}>
+                        <p className="form-label" style={statLabel}>Weekly Units</p>
+                        <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '2px' }}>
+                            {totalWeeklyUnits % 1 === 0 ? totalWeeklyUnits.toLocaleString() : totalWeeklyUnits.toFixed(1)}
+                        </p>
+                        {weeklyUnitBreakdown.length > 1 && (
+                            <p style={{ fontSize: '0.68rem', color: 'var(--huel-mid-gray)', margin: 0 }}>{weeklyBreakdownStr}</p>
                         )}
                     </div>
-                </div>
-                {isEditMode && (
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                        <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem' }} onClick={() => onEdit(index)}>Edit</button>
-                        <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem' }} onClick={() => onDuplicate(index)}>Copy</button>
-                        <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem', color: 'var(--huel-pink)' }} onClick={() => onRemove(index)}>Delete</button>
+
+                    {/* Monthly Units + Trade Rate side by side */}
+                    <div style={{ display: 'flex', gap: '1.5rem' }}>
+                        <div>
+                            <p className="form-label" style={statLabel}>Monthly Units</p>
+                            <p className="font-bold" style={{ color: 'var(--huel-dark)' }}>{Math.round((huel.annualUnits || 0) / 12).toLocaleString()}</p>
+                        </div>
+                        <div>
+                            <p className="form-label" style={statLabel}>Trade Rate</p>
+                            <p className="font-bold" style={{ color: 'var(--huel-dark)' }}>{formatPercent(huel.tradeRatePercent)}</p>
+                        </div>
                     </div>
-                )}
-            </div>
-
-            {/* Core metrics */}
-            <div className="grid grid-cols-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
-                <div>
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Product(s)</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', fontSize: '0.875rem', marginBottom: '0.75rem' }}>{productNames}</p>
-
-                    <p className="form-label" style={{ marginBottom: '2px' }}>{client.clientType === 'Vending' ? 'Vending Locations' : 'Stores'}</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '0.75rem' }}>{totalStores.toLocaleString()}</p>
-
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Weekly Units</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '2px' }}>{totalWeeklyUnits % 1 === 0 ? totalWeeklyUnits.toLocaleString() : totalWeeklyUnits.toFixed(1).toLocaleString()}</p>
-                    {weeklyUnitBreakdown.length > 1 && (
-                        <p style={{ fontSize: '0.7rem', color: 'var(--huel-mid-gray)', marginBottom: '0.75rem' }}>{weeklyBreakdownStr}</p>
-                    )}
-                    {weeklyUnitBreakdown.length <= 1 && <div style={{ marginBottom: '0.75rem' }} />}
-
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Monthly Units</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '0.75rem' }}>{(Math.round((huel.annualUnits || 0) / 12)).toLocaleString()}</p>
-
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Trade Rate</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)' }}>{formatPercent(huel.tradeRatePercent)}</p>
                 </div>
 
+                {/* Right — financials */}
                 <div>
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Yr 1 Gross Revenue</p>
-                    <p className="font-bold" style={{ color: 'var(--huel-dark)', marginBottom: '0.75rem' }}>{formatCurrency(huel.year1GrossRevenue)}</p>
+                    <div style={statRow}>
+                        <p className="form-label" style={statLabel}>Yr 1 Revenue</p>
+                        <p className="font-bold" style={{ color: 'var(--huel-dark)', fontSize: '1.05rem' }}>{formatCurrency(huel.year1GrossRevenue)}</p>
+                    </div>
 
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Yr 1 Gross Profit</p>
-                    <p className="font-bold text-success" style={{ marginBottom: '0.75rem' }}>{formatCurrency(huel.year1GrossProfit)}</p>
+                    <div style={statRow}>
+                        <p className="form-label" style={statLabel}>Gross Profit</p>
+                        <p className="font-bold text-success" style={{ fontSize: '1.05rem' }}>{formatCurrency(huel.year1GrossProfit)}</p>
+                    </div>
 
-                    <p className="form-label" style={{ marginBottom: '2px' }}>Yr 1 EBITDA</p>
-                    <p className={`font-bold ${huel.year1Ebitda >= 0 ? 'text-success' : 'text-danger'}`}>
-                        {formatCurrency(huel.year1Ebitda)}
-                    </p>
+                    <div>
+                        <p className="form-label" style={statLabel}>EBITDA</p>
+                        <p className={`font-bold ${huel.year1Ebitda >= 0 ? 'text-success' : 'text-danger'}`} style={{ fontSize: '1.05rem' }}>
+                            {formatCurrency(huel.year1Ebitda)}
+                        </p>
+                    </div>
                 </div>
             </div>
 
-            {/* Vending Revenue Share detail panel */}
+            {/* ── Revenue Share detail panel ───────────────────────────── */}
             {isRevenueShare && (
                 <div style={{
-                    background: 'rgba(0,86,179,0.06)',
-                    border: '1px solid rgba(0,86,179,0.2)',
+                    background: 'rgba(0,86,179,0.05)',
+                    border: '1px solid rgba(0,86,179,0.18)',
                     borderLeft: '3px solid var(--huel-blue)',
                     padding: '0.65rem 0.85rem',
                     marginBottom: '0.75rem',
                     fontSize: '0.78rem',
                 }}>
-                    <div style={{ fontWeight: 700, color: 'var(--huel-blue)', textTransform: 'uppercase', letterSpacing: '0.04em', fontSize: '0.7rem', marginBottom: '6px' }}>
+                    <div style={{ fontWeight: 700, color: 'var(--huel-blue)', textTransform: 'uppercase', letterSpacing: '0.04em', fontSize: '0.68rem', marginBottom: '6px' }}>
                         Revenue Share Deal
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--huel-dark)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--huel-dark)', marginBottom: '3px' }}>
                         <span>Min to Partner</span>
                         <span style={{ fontWeight: 700 }}>{formatCurrency(huel.revenueShareMinMonthly)}/mo · {formatCurrency(huel.revenueShareMin)}/yr</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--huel-dark)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--huel-dark)', marginBottom: '3px' }}>
                         <span>Partner Split</span>
                         <span style={{ fontWeight: 700 }}>{(huel.revenueSharePct * 100).toFixed(0)}% of retail sales</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--huel-dark)', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(0,86,179,0.15)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--huel-dark)', marginTop: '5px', paddingTop: '5px', borderTop: '1px solid rgba(0,86,179,0.15)' }}>
                         <span>Partner Payout (Yr 1)</span>
                         <span style={{ fontWeight: 700, color: 'var(--huel-pink)' }}>−{formatCurrency(huel.totalPartnerPayout)}</span>
                     </div>
                 </div>
             )}
 
-            {/* Vending machine cost pill (shown when machine cost > 0) */}
-            {huel.totalMachineCost > 0 && (
-                <div style={{ background: 'var(--huel-light-gray)', padding: '0.5rem 0.75rem', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid rgba(0,0,0,0.06)' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        Machine Cost ({totalMachineLocations} loc.)
-                    </span>
-                    <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--huel-pink)' }}>
-                        −{formatCurrency(huel.totalMachineCost)}
-                    </span>
-                </div>
-            )}
+            {/* ── Footer strip: machine cost · retailer margin · breakeven ─ */}
+            <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
 
-            {/* Retailer margin pill */}
-            <div style={{ background: 'var(--huel-light-gray)', padding: '0.5rem 0.75rem', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Retailer Margin</span>
-                <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--huel-dark)' }}>{formatPercent(retailer.marginPercent)}</span>
-            </div>
+                {/* Machine cost row (conditional) */}
+                {huel.totalMachineCost > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Machine Cost ({totalMachineLocations} units)
+                        </span>
+                        <span style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--huel-pink)' }}>
+                            −{formatCurrency(huel.totalMachineCost)}
+                        </span>
+                    </div>
+                )}
 
-            {/* Breakeven visual bar */}
-            <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Breakeven</span>
-                    <span className={`font-bold ${isHealthy ? 'text-success' : 'text-danger'}`} style={{ fontSize: '0.875rem' }}>
-                        {huel.breakevenMonths > 0 ? `${huel.breakevenMonths.toFixed(1)} mo` : 'Immediate'}
+                {/* Retailer margin + breakeven on one row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Retailer Margin
+                    </span>
+                    <span style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--huel-dark)' }}>
+                        {formatPercent(retailer.marginPercent)}
                     </span>
                 </div>
-                <div className="breakeven-bar-track">
-                    <div
-                        className="breakeven-bar-fill"
-                        style={{
-                            width: `${breakevenPct}%`,
-                            background: isHealthy ? 'var(--huel-blue)' : 'var(--huel-pink)'
-                        }}
-                    />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
-                    <span style={{ fontSize: '0.65rem', color: 'var(--huel-mid-gray)' }}>0</span>
-                    <span style={{ fontSize: '0.65rem', color: 'var(--huel-mid-gray)' }}>24 mo</span>
+
+                {/* Breakeven bar */}
+                <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--huel-mid-gray)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Breakeven</span>
+                        <span className={`font-bold ${isHealthy ? 'text-success' : 'text-danger'}`} style={{ fontSize: '0.82rem' }}>
+                            {huel.breakevenMonths > 0 ? `${huel.breakevenMonths.toFixed(1)} mo` : 'Immediate'}
+                        </span>
+                    </div>
+                    <div className="breakeven-bar-track">
+                        <div className="breakeven-bar-fill" style={{ width: `${breakevenPct}%`, background: isHealthy ? 'var(--huel-blue)' : 'var(--huel-pink)' }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--huel-mid-gray)' }}>0</span>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--huel-mid-gray)' }}>24 mo</span>
+                    </div>
                 </div>
             </div>
         </div>
