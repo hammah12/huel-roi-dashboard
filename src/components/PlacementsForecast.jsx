@@ -55,6 +55,18 @@ const tdStyle = (align) => ({
 const fmtCurrency = (val) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
 
+// Quarter derived from pipeline status (used when no manual forecast row exists)
+const STATUS_TO_QUARTER = {
+    'Hot Pipeline':  'Q2',
+    'High Interest': 'Q3',
+    'Prospect':      'Q4',
+};
+
+const getClientLocations = (client) => {
+    const products = client.products || [client];
+    return Math.max(...products.map(p => Number(p.numStores) || 0), 0);
+};
+
 // ── Main Component ──────────────────────────────────────────────────────────
 export default function PlacementsForecast({ clients = [], onConvert }) {
     const [rows, setRows] = useState(() => {
@@ -111,13 +123,33 @@ export default function PlacementsForecast({ clients = [], onConvert }) {
         return bestQ && row[bestQ] > 0 ? bestQ : null;
     };
 
+    // ── Pipeline Gantt rows (auto-derived from leads without a manual row) ────
+    const pipelineGanttRows = leadClients
+        .filter(c => !rows.some(r => r.partner?.toLowerCase() === c.retailerName?.toLowerCase()))
+        .sort((a, b) =>
+            PIPELINE_STATUS_ORDER.indexOf(a.pipelineStatus) - PIPELINE_STATUS_ORDER.indexOf(b.pipelineStatus)
+        )
+        .map(client => {
+            const q = STATUS_TO_QUARTER[client.pipelineStatus] || 'Q4';
+            const locations = getClientLocations(client);
+            return {
+                partner: client.retailerName,
+                type: client.clientType || 'Vending',
+                Q1: 0, Q2: 0, Q3: 0, Q4: 0,
+                [q]: locations,
+                pipelineStatus: client.pipelineStatus,
+            };
+        });
+
     // ── Derived data ──────────────────────────────────────────────────────
     const rowTotal = (r) => QUARTERS.reduce((s, q) => s + (r[q] || 0), 0);
     const annualTotal = rows.reduce((s, r) => s + rowTotal(r), 0);
+    const pipelineAnnualTotal = pipelineGanttRows.reduce((s, r) => s + rowTotal(r), 0);
 
     const maxQVal = Math.max(
         1,
-        ...rows.flatMap(r => QUARTERS.map(q => r[q] || 0))
+        ...rows.flatMap(r => QUARTERS.map(q => r[q] || 0)),
+        ...pipelineGanttRows.flatMap(r => QUARTERS.map(q => r[q] || 0)),
     );
 
     const chartData = QUARTERS.map(q => {
@@ -125,11 +157,14 @@ export default function PlacementsForecast({ clients = [], onConvert }) {
         TYPES.forEach(t => {
             point[t] = rows.filter(r => r.type === t).reduce((s, r) => s + (r[q] || 0), 0);
         });
+        // Pipeline projected placements (all types combined, single neutral series)
+        point['Pipeline'] = pipelineGanttRows.reduce((s, r) => s + (r[q] || 0), 0);
         point.total = rows.reduce((s, r) => s + (r[q] || 0), 0);
         return point;
     });
 
-    const qTotals = QUARTERS.map(q => rows.reduce((s, r) => s + (r[q] || 0), 0));
+    const qTotals    = QUARTERS.map(q => rows.reduce((s, r) => s + (r[q] || 0), 0));
+    const qPipeline  = QUARTERS.map(q => pipelineGanttRows.reduce((s, r) => s + (r[q] || 0), 0));
 
     // Pipeline filter pill counts
     const pipelineStatusCounts = PIPELINE_STATUS_ORDER.reduce((acc, status) => {
@@ -144,8 +179,7 @@ export default function PlacementsForecast({ clients = [], onConvert }) {
                 <div>
                     <h1 style={{ marginBottom: '4px' }}>Placements Forecast</h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--huel-mid-gray)' }}>
-                        {rows.length} partner{rows.length !== 1 ? 's' : ''} · {annualTotal} total placements planned
-                        {leadClients.length > 0 && ` · ${leadClients.length} lead${leadClients.length !== 1 ? 's' : ''} in pipeline`}
+                        {annualTotal} confirmed · {pipelineAnnualTotal} projected from {pipelineGanttRows.length + (leadClients.length - pipelineGanttRows.length)} pipeline leads
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -457,6 +491,14 @@ export default function PlacementsForecast({ clients = [], onConvert }) {
                                     />
                                 </Bar>
                             ))}
+                            <Bar key="Pipeline" dataKey="Pipeline" name="Pipeline (projected)" fill="#aaaaaa" opacity={0.45} radius={0}>
+                                <LabelList
+                                    dataKey="Pipeline"
+                                    position="top"
+                                    formatter={v => v > 0 ? v : ''}
+                                    style={{ fontSize: 10, fill: '#888', fontFamily: 'Helvetica Neue', fontWeight: 600 }}
+                                />
+                            </Bar>
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
@@ -477,7 +519,7 @@ export default function PlacementsForecast({ clients = [], onConvert }) {
                     </div>
                 </div>
 
-                {rows.length === 0 ? (
+                {rows.length === 0 && pipelineGanttRows.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--huel-mid-gray)' }}>
                         <p style={{ marginBottom: '0.5rem' }}>No partners added yet.</p>
                         <p style={{ fontSize: '0.85rem' }}>Click <strong>Edit Forecast → + Add Partner</strong> to build your pipeline.</p>
@@ -618,13 +660,128 @@ export default function PlacementsForecast({ clients = [], onConvert }) {
                                     );
                                 })}
 
-                                {/* ── Totals row ── */}
+                                {/* ── Pipeline Gantt rows ── */}
+                                {pipelineGanttRows.length > 0 && (
+                                    <>
+                                        {/* Section divider */}
+                                        <tr>
+                                            <td colSpan={6 + (isEditing ? 1 : 0)} style={{ padding: 0 }}>
+                                                <div style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.6rem',
+                                                    padding: '0.45rem 0.75rem',
+                                                    background: 'var(--huel-light-gray)',
+                                                    borderTop: '2px dashed #ccc',
+                                                    borderBottom: '1px solid var(--border-light)',
+                                                }}>
+                                                    <span style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--huel-mid-gray)' }}>
+                                                        Pipeline Projected
+                                                    </span>
+                                                    <span style={{ fontSize: '0.6rem', color: 'var(--huel-mid-gray)', fontStyle: 'italic' }}>
+                                                        — auto-populated from leads · convert a deal to move it to confirmed
+                                                    </span>
+                                                </div>
+                                            </td>
+                                        </tr>
+
+                                        {pipelineGanttRows.map((row, i) => {
+                                            const total = rowTotal(row);
+                                            const color = TYPE_COLORS[row.type] || TYPE_COLORS['Vending'];
+                                            const statusCfg = PIPELINE_STATUS_CONFIG[row.pipelineStatus] || { label: row.pipelineStatus, bg: '#888', color: '#fff' };
+
+                                            return (
+                                                <tr
+                                                    key={`pipeline_${i}`}
+                                                    style={{
+                                                        borderBottom: '1px solid var(--border-light)',
+                                                        background: 'rgba(0,0,0,0.012)',
+                                                        opacity: 0.85,
+                                                    }}
+                                                >
+                                                    {/* Partner name + status badge */}
+                                                    <td style={tdStyle('left')}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                                            <span style={{ fontWeight: 600, color: 'var(--huel-dark)', fontSize: '0.85rem' }}>
+                                                                {row.partner}
+                                                            </span>
+                                                            <span style={{
+                                                                fontSize: '0.58rem', fontWeight: 700,
+                                                                padding: '1px 5px',
+                                                                background: statusCfg.bg, color: statusCfg.color,
+                                                                textTransform: 'uppercase', letterSpacing: '0.04em',
+                                                            }}>
+                                                                {statusCfg.label}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+
+                                                    {/* Type */}
+                                                    <td style={tdStyle('left')}>
+                                                        <span style={{
+                                                            fontSize: '0.62rem', fontWeight: 700,
+                                                            padding: '2px 6px',
+                                                            background: color, color: '#fff',
+                                                            textTransform: 'uppercase', letterSpacing: '0.04em',
+                                                            opacity: 0.75,
+                                                        }}>
+                                                            {row.type}
+                                                        </span>
+                                                    </td>
+
+                                                    {/* Q1–Q4 cells */}
+                                                    {QUARTERS.map(q => {
+                                                        const count = row[q] || 0;
+                                                        const barPct = count > 0 ? Math.max(12, Math.round((count / maxQVal) * 100)) : 0;
+                                                        return (
+                                                            <td key={q} style={{ ...tdStyle('center'), minWidth: '80px' }}>
+                                                                {count > 0 ? (
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                                                                        {/* Dashed/outlined bar for pipeline */}
+                                                                        <div style={{
+                                                                            height: '6px',
+                                                                            width: `${barPct}%`,
+                                                                            minWidth: '20px',
+                                                                            background: 'repeating-linear-gradient(90deg, ' + color + ' 0px, ' + color + ' 4px, transparent 4px, transparent 7px)',
+                                                                            opacity: 0.65,
+                                                                        }} />
+                                                                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--huel-mid-gray)' }}>
+                                                                            {count}
+                                                                        </span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <span style={{ color: 'var(--border-light)', fontSize: '0.9rem' }}>—</span>
+                                                                )}
+                                                            </td>
+                                                        );
+                                                    })}
+
+                                                    {/* Row total */}
+                                                    <td style={{
+                                                        ...tdStyle('center'),
+                                                        fontWeight: 600,
+                                                        color: total > 0 ? 'var(--huel-mid-gray)' : 'var(--huel-mid-gray)',
+                                                        background: total > 0 ? 'rgba(0,0,0,0.025)' : 'transparent',
+                                                        borderLeft: '1px solid var(--border-light)',
+                                                        fontStyle: 'italic',
+                                                    }}>
+                                                        {total || '—'}
+                                                    </td>
+
+                                                    {isEditing && <td />}
+                                                </tr>
+                                            );
+                                        })}
+                                    </>
+                                )}
+
+                                {/* ── Confirmed totals row ── */}
                                 <tr style={{ background: 'var(--huel-dark)' }}>
                                     <td
                                         colSpan={2}
                                         style={{ ...tdStyle('left'), color: 'rgba(255,255,255,0.6)', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}
                                     >
-                                        Total Placements
+                                        Confirmed
                                     </td>
                                     {QUARTERS.map((q, i) => (
                                         <td key={q} style={{
@@ -647,6 +804,40 @@ export default function PlacementsForecast({ clients = [], onConvert }) {
                                     </td>
                                     {isEditing && <td />}
                                 </tr>
+
+                                {/* ── Pipeline totals row ── */}
+                                {pipelineGanttRows.length > 0 && (
+                                    <tr style={{ background: '#444' }}>
+                                        <td
+                                            colSpan={2}
+                                            style={{ ...tdStyle('left'), color: 'rgba(255,255,255,0.5)', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontStyle: 'italic' }}
+                                        >
+                                            + Pipeline
+                                        </td>
+                                        {QUARTERS.map((q, i) => (
+                                            <td key={q} style={{
+                                                ...tdStyle('center'),
+                                                fontWeight: 700,
+                                                fontSize: '0.9rem',
+                                                color: qPipeline[i] > 0 ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.2)',
+                                                fontStyle: 'italic',
+                                            }}>
+                                                {qPipeline[i] > 0 ? `+${qPipeline[i]}` : '—'}
+                                            </td>
+                                        ))}
+                                        <td style={{
+                                            ...tdStyle('center'),
+                                            fontWeight: 700,
+                                            fontSize: '1rem',
+                                            color: 'rgba(255,255,255,0.65)',
+                                            borderLeft: '1px solid rgba(255,255,255,0.1)',
+                                            fontStyle: 'italic',
+                                        }}>
+                                            +{pipelineAnnualTotal}
+                                        </td>
+                                        {isEditing && <td />}
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
