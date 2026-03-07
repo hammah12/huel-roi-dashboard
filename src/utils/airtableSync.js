@@ -1,40 +1,10 @@
-/**
- * Airtable sync utility for Huel ROI Dashboard
- *
- * Airtable base schema (set this up once in your Airtable account):
- *
- * TABLE: "Retailers"
- *   - Name              (Single line text — primary field)
- *   - Client Type       (Single select: Vending | Airport Concessions | Food Service)
- *   - Route to Market   (Single select: DSD | Distributor | Direct to Retailer | Wholesale)
- *   - Synced At         (Date — auto-set on write)
- *
- * TABLE: "Products"
- *   - Retailer              (Link to Retailers)
- *   - Product Name          (Single select: Huel BE RTD | Huel DG RTD)
- *   - Num Stores            (Number)
- *   - Base Velocity         (Number, allow decimals)
- *   - SRP                   (Currency)
- *   - Slotting Fixed        (Currency)
- *   - Slotting Free Fill Qty (Number)
- *   - TPRs                  (Currency)
- *   - Marketing             (Currency)
- *
- * TABLE: "Pricing Config"
- *   - Config Key   (Single line text — primary field, e.g. "DSD", "Huel BE RTD")
- *   - Type         (Single select: RTM Price | Product COGS | Product Default SRP)
- *   - Value        (Number)
- *
- * Seed "Pricing Config" with:
- *   DSD                → RTM Price      → 2.39
- *   Distributor        → RTM Price      → 2.52
- *   Direct to Retailer → RTM Price      → 2.85
- *   Wholesale          → RTM Price      → 3.00
- *   Huel BE RTD        → Product COGS   → 1.42
- *   Huel BE RTD        → Product Default SRP → 4.99
- *   Huel DG RTD        → Product COGS   → 0.77
- *   Huel DG RTD        → Product Default SRP → 3.49
- */
+import { getPrimaryRouteToMarket, getProductsList } from './calculations'
+import {
+    markClientSyncFailure,
+    markClientSyncSuccess,
+    markPricingFetchFailure,
+    markPricingFetchSuccess,
+} from './dataStatus'
 
 const AIRTABLE_API = 'https://api.airtable.com/v0';
 
@@ -110,9 +80,11 @@ export const fetchPricingData = async () => {
             }
         });
 
+        markPricingFetchSuccess('Airtable');
         return { pricingTiers, products };
     } catch (err) {
         console.error('Airtable fetchPricingData error:', err);
+        markPricingFetchFailure('Airtable', err.message);
         return null;
     }
 };
@@ -136,7 +108,17 @@ export const syncClientToAirtable = async (clientData) => {
                     fields: {
                         'Name':             clientData.retailerName,
                         'Client Type':      clientData.clientType || 'Vending',
-                        'Route to Market':  clientData.routeToMarket,
+                        'Route to Market':  getPrimaryRouteToMarket(clientData),
+                        'Account Owner':    clientData.accountOwner || '',
+                        'Priority Tier':    clientData.priorityTier || 'Medium',
+                        'Win Probability':  Number(clientData.winProbability) || 0,
+                        'Forecast Quarter': clientData.forecastQuarter || '',
+                        'Target Launch Date': clientData.targetLaunchDate || null,
+                        'Next Action':      clientData.nextAction || '',
+                        'Next Action Due Date': clientData.nextActionDueDate || null,
+                        'Notes':            clientData.notes || '',
+                        'Created At':       clientData.createdAt || new Date().toISOString(),
+                        'Updated At':       clientData.updatedAt || new Date().toISOString(),
                         'Synced At':        new Date().toISOString().split('T')[0],
                     },
                 }),
@@ -152,8 +134,7 @@ export const syncClientToAirtable = async (clientData) => {
         const retailerId = retailer.id;
 
         // 2. Create a Product record for each product, linked to the Retailer
-        const products = clientData.products || [clientData];
-        for (const prod of products) {
+        for (const prod of getProductsList(clientData)) {
             const prodRes = await fetch(
                 `${AIRTABLE_API}/${config.baseId}/Products`,
                 {
@@ -163,6 +144,7 @@ export const syncClientToAirtable = async (clientData) => {
                         fields: {
                             'Retailer':               [retailerId],
                             'Product Name':           prod.productName,
+                            'Route to Market':        prod.routeToMarket || 'DSD',
                             'Num Stores':             Number(prod.numStores) || 0,
                             'Base Velocity':          Number(prod.baseVelocity) || 0,
                             'SRP':                    Number(prod.srp) || 0,
@@ -181,9 +163,11 @@ export const syncClientToAirtable = async (clientData) => {
             }
         }
 
+        markClientSyncSuccess('Airtable');
         return { success: true };
     } catch (err) {
         console.error('Airtable syncClient error:', err);
+        markClientSyncFailure('Airtable', err.message);
         return { success: false, error: err.message };
     }
 };

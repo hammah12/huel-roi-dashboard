@@ -1,286 +1,487 @@
-import React, { useState, useEffect } from 'react';
-import { getSyncUrl as getGSheetsUrl, setSyncUrl as setGSheetsUrl, fetchPricingData as fetchGSheetsPricing } from '../utils/googleSheetsSync';
-import { getConfig as getAirtableConfig, setConfig as setAirtableConfig, testConnection as testAirtable, fetchPricingData as fetchAirtablePricing } from '../utils/airtableSync';
-import { updateDynamicPricing } from '../utils/calculations';
+import { useEffect, useState } from 'react'
 
-// ── Default product catalogue ──────────────────────────────────────────────
-export const DEFAULT_PRODUCTS = [
-    { name: 'Huel BE RTD', cogs: 1.42, defaultSrp: 4.99 },
-    { name: 'Huel DG RTD', cogs: 0.77, defaultSrp: 3.49 },
-];
+import {
+  fetchPricingData,
+  getConfig,
+  setConfig,
+  testConnection,
+} from '../utils/airtableSync'
+import { updateDynamicPricing } from '../utils/calculations'
+import { getDataStatus } from '../utils/dataStatus'
+import {
+  DEFAULT_PRODUCTS,
+  loadProducts,
+  mergeRemoteProducts,
+  saveProducts,
+} from '../utils/productCatalog'
 
-export function loadProducts() {
-    try {
-        const saved = localStorage.getItem('huelProducts');
-        return saved ? JSON.parse(saved) : DEFAULT_PRODUCTS;
-    } catch {
-        return DEFAULT_PRODUCTS;
-    }
+const EMPTY_PRODUCT = { name: '', cogs: '', defaultSrp: '' }
+
+const RETAILER_SCHEMA = [
+  ['Name', 'Single line text', 'Primary field for the retailer or account name'],
+  ['Client Type', 'Single select', 'Vending | Micromarket | Airport Concessions | Food Service'],
+  ['Route to Market', 'Single line text', 'Top-level summary only; per-product RTM lives in Products'],
+  ['Account Owner', 'Single line text', 'Commercial owner responsible for the deal'],
+  ['Priority Tier', 'Single select', 'High | Medium | Low'],
+  ['Win Probability', 'Number', 'Store as a whole number from 0 to 100'],
+  ['Forecast Quarter', 'Single select', 'Q1 | Q2 | Q3 | Q4'],
+  ['Target Launch Date', 'Date', 'Planned launch date for pipeline tracking'],
+  ['Next Action', 'Long text', 'Next commercial step'],
+  ['Next Action Due Date', 'Date', 'Due date for the next action'],
+  ['Notes', 'Long text', 'Commercial notes and context'],
+  ['Created At', 'Date with time', 'ISO timestamp from the app'],
+  ['Updated At', 'Date with time', 'ISO timestamp from the app'],
+  ['Synced At', 'Date', 'Date stamp for the most recent sync'],
+]
+
+const PRODUCT_SCHEMA = [
+  ['Retailer', 'Link to another record', 'Links each SKU row back to Retailers'],
+  ['Product Name', 'Single select', 'SKU name used in the dashboard catalogue'],
+  ['Route to Market', 'Single select', 'DSD | Distributor | Direct to Retailer | Wholesale'],
+  ['Num Stores', 'Number', 'Store, location, or machine count for this product row'],
+  ['Base Velocity', 'Number', 'Units per location per week'],
+  ['SRP', 'Currency', 'Retail selling price'],
+  ['Slotting Fixed', 'Currency', 'One-time slotting fee'],
+  ['Slotting Free Fill Qty', 'Number', 'Free-fill units for launch'],
+  ['TPRs', 'Currency', 'Total temporary price reduction spend'],
+  ['Marketing', 'Currency', 'Total marketing spend attached to the SKU'],
+]
+
+const PRICING_SCHEMA = [
+  ['Config Key', 'Single line text', 'Route-to-market name or product name'],
+  ['Type', 'Single select', 'RTM Price | Product COGS | Product Default SRP'],
+  ['Value', 'Number', 'Numeric value used by the pricing engine'],
+]
+
+function formatTimestamp(value) {
+  if (!value) {
+    return 'Not yet'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return 'Not yet'
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
 }
 
-export function saveProducts(products) {
-    localStorage.setItem('huelProducts', JSON.stringify(products));
-    const productMap = {};
-    products.forEach(p => {
-        productMap[p.name] = { cogs: Number(p.cogs), defaultSrp: Number(p.defaultSrp) };
-    });
-    updateDynamicPricing({}, productMap);
+function StatusNotice({ notice }) {
+  if (!notice) {
+    return null
+  }
+
+  return <div className={`status-notice status-notice--${notice.tone}`}>{notice.message}</div>
 }
 
-// ── Mini schema table component ───────────────────────────────────
 function SchemaTable({ title, rows }) {
-    return (
-        <div style={{ marginBottom: '1.25rem' }}>
-            <p style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--huel-dark)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
-                {title}
-            </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                <thead>
-                    <tr style={{ background: 'var(--huel-dark)', color: '#fff' }}>
-                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Field</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Type</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Notes</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows.map((r, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--border-light)', background: i % 2 === 0 ? '#fff' : 'var(--huel-light-gray)' }}>
-                            <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: 'var(--huel-blue)' }}>{r[0]}</td>
-                            <td style={{ padding: '6px 10px', color: 'var(--huel-mid-gray)' }}>{r[1]}</td>
-                            <td style={{ padding: '6px 10px', color: 'var(--huel-dark)' }}>{r[2]}</td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
+  return (
+    <div className="schema-table">
+      <div className="schema-table__header">
+        <p className="eyebrow">{title}</p>
+      </div>
+
+      <div className="table-shell">
+        <table className="dashboard-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Type</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([field, type, notes]) => (
+              <tr key={`${title}-${field}`}>
+                <td><strong>{field}</strong></td>
+                <td>{type}</td>
+                <td>{notes}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 }
 
-// ── Product Catalogue Card ─────────────────────────────────────────────────
 function ProductCatalogue({ onProductsUpdated }) {
-    const [products, setProducts] = useState(loadProducts);
-    const [saveMsg, setSaveMsg] = useState(null);
+  const [products, setProducts] = useState(() => loadProducts())
+  const [notice, setNotice] = useState(null)
 
-    const update = (index, field, value) => {
-        setProducts(prev => prev.map((p, i) => i === index ? { ...p, [field]: value } : p));
-    };
+  const updateRow = (index, field, value) => {
+    setProducts((currentProducts) => currentProducts.map((product, productIndex) => (
+      productIndex === index ? { ...product, [field]: value } : product
+    )))
+  }
 
-    const addProduct = () => {
-        setProducts(prev => [...prev, { name: '', cogs: '', defaultSrp: '' }]);
-    };
+  const addRow = () => {
+    setProducts((currentProducts) => [...currentProducts, { ...EMPTY_PRODUCT }])
+  }
 
-    const removeProduct = (index) => {
-        setProducts(prev => prev.filter((_, i) => i !== index));
-    };
+  const removeRow = (index) => {
+    setProducts((currentProducts) => currentProducts.filter((_, productIndex) => productIndex !== index))
+  }
 
-    const handleSave = () => {
-        const cleaned = products.filter(p => p.name.trim());
-        if (!cleaned.length) {
-            setSaveMsg({ type: 'error', text: 'At least one product is required.' });
-            return;
-        }
-        saveProducts(cleaned);
-        setProducts(cleaned);
-        setSaveMsg({ type: 'success', text: 'Product catalogue saved.' });
-        if (onProductsUpdated) onProductsUpdated(cleaned);
-        setTimeout(() => setSaveMsg(null), 3000);
-    };
+  const handleSave = () => {
+    const cleanedProducts = products
+      .filter((product) => product.name.trim())
+      .map((product) => ({
+        name: product.name.trim(),
+        cogs: Number(product.cogs) || 0,
+        defaultSrp: Number(product.defaultSrp) || 0,
+      }))
 
-    const inputStyle = {
-        border: '1px solid var(--border-light)',
-        padding: '5px 8px',
-        fontFamily: 'Helvetica Neue, sans-serif',
-        fontSize: '0.85rem',
-        width: '100%',
-    };
+    if (cleanedProducts.length === 0) {
+      setNotice({ tone: 'error', message: 'Add at least one product before saving the catalogue.' })
+      return
+    }
 
-    return (
-        <div className="glass-card">
-            <div style={{ height: '3px', background: 'var(--huel-blue)', margin: '-1.5rem -1.5rem 1.5rem -1.5rem' }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem' }}>
-                <div>
-                    <h2 style={{ color: 'var(--huel-dark)', margin: 0, marginBottom: '4px', fontFamily: 'var(--font-heading)' }}>
-                        Product Catalogue
-                    </h2>
-                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--huel-mid-gray)' }}>
-                        Settings for default SKU costs and MSRP. Changes reflect immediately in calculations.
-                    </p>
-                </div>
-                <button type="button" className="btn btn-primary" onClick={addProduct} style={{ fontSize: '0.8rem', padding: '0.4rem 0.9rem' }}>
-                    + Add Product
-                </button>
-            </div>
+    saveProducts(cleanedProducts)
+    setProducts(cleanedProducts)
+    onProductsUpdated?.(cleanedProducts)
+    setNotice({ tone: 'success', message: 'Product catalogue saved. ROI calculations now use the updated defaults.' })
+  }
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
-                <thead>
-                    <tr>
-                        {['Product Name', 'COGS ($)', 'Default SRP ($)', ''].map(h => (
-                            <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--huel-mid-gray)', borderBottom: '2px solid var(--border-light)' }}>{h}</th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody>
-                    {products.map((p, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                            <td style={{ padding: '8px 10px' }}><input value={p.name} onChange={e => update(i, 'name', e.target.value)} style={inputStyle} /></td>
-                            <td style={{ padding: '8px 10px' }}><input type="number" value={p.cogs} onChange={e => update(i, 'cogs', e.target.value)} style={inputStyle} step="0.01" /></td>
-                            <td style={{ padding: '8px 10px' }}><input type="number" value={p.defaultSrp} onChange={e => update(i, 'defaultSrp', e.target.value)} style={inputStyle} step="0.01" /></td>
-                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                                <button type="button" onClick={() => removeProduct(i)} style={{ background: 'none', border: 'none', color: 'var(--huel-pink)', cursor: 'pointer', fontWeight: 700 }}>×</button>
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-
-            {saveMsg && <div style={{ marginBottom: '1rem', padding: '0.6rem 1rem', background: '#f5f5f5', borderLeft: '3px solid var(--huel-blue)', fontSize: '0.85rem' }}>{saveMsg.text}</div>}
-
-            <button type="button" className="btn btn-primary" onClick={handleSave}>Save Catalogue</button>
+  return (
+    <section className="glass-card settings-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Product catalogue</p>
+          <h2>Keep SKU cost and SRP assumptions aligned</h2>
+          <p className="view-header__copy">
+            Local catalogue values are the fallback. Airtable refreshes can merge in remote SKU pricing when available.
+          </p>
         </div>
-    );
+
+        <div className="settings-actions">
+          <button type="button" className="btn btn-secondary" onClick={addRow}>
+            Add product
+          </button>
+          <button type="button" className="btn btn-primary" onClick={handleSave}>
+            Save catalogue
+          </button>
+        </div>
+      </div>
+
+      <StatusNotice notice={notice} />
+
+      <div className="table-shell">
+        <table className="dashboard-table product-table">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>COGS</th>
+              <th>Default SRP</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((product, index) => (
+              <tr key={`${product.name || 'product'}-${index}`}>
+                <td>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={product.name}
+                    onChange={(event) => updateRow(index, 'name', event.target.value)}
+                    placeholder={DEFAULT_PRODUCTS[index]?.name || 'New product'}
+                  />
+                </td>
+                <td>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={product.cogs}
+                    onChange={(event) => updateRow(index, 'cogs', event.target.value)}
+                  />
+                </td>
+                <td>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={product.defaultSrp}
+                    onChange={(event) => updateRow(index, 'defaultSrp', event.target.value)}
+                  />
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-danger"
+                    onClick={() => removeRow(index)}
+                    disabled={products.length === 1}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
 }
 
-// ── Main Settings Component ────────────────────────────────────────────────
-export default function Settings({ onDataLoaded, onProductsUpdated }) {
-    // GSheets state
-    const [gsUrl, setGsUrl] = useState('');
-    const [gsStatus, setGsStatus] = useState(null);
-    const [isGsLoading, setIsGsLoading] = useState(false);
-    const [isGsConnected, setIsGsConnected] = useState(false);
+export default function Settings({ onProductsUpdated }) {
+  const [token, setToken] = useState('')
+  const [baseId, setBaseId] = useState('')
+  const [notice, setNotice] = useState(null)
+  const [showGuide, setShowGuide] = useState(false)
+  const [isTesting, setIsTesting] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [dataStatus, setDataStatus] = useState(() => getDataStatus())
 
-    // Airtable state
-    const [atToken, setAtToken] = useState('');
-    const [atBaseId, setAtBaseId] = useState('');
-    const [atStatus, setAtStatus] = useState(null);
-    const [isAtLoading, setIsAtLoading] = useState(false);
-    const [isAtConnected, setIsAtConnected] = useState(false);
+  useEffect(() => {
+    const config = getConfig()
+    if (!config) {
+      return
+    }
 
-    const [showGuide, setShowGuide] = useState(false);
+    setToken(config.token)
+    setBaseId(config.baseId)
+  }, [])
 
-    useEffect(() => {
-        const savedGsUrl = getGSheetsUrl();
-        if (savedGsUrl) {
-            setGsUrl(savedGsUrl);
-            setIsGsConnected(true);
-        }
+  const refreshStatus = () => {
+    setDataStatus(getDataStatus())
+  }
 
-        const atConfig = getAirtableConfig();
-        if (atConfig) {
-            setAtToken(atConfig.token);
-            setAtBaseId(atConfig.baseId);
-            setIsAtConnected(true);
-        }
-    }, [getGSheetsUrl, getAirtableConfig]);
+  const applyRemotePricing = (data) => {
+    if (!data) {
+      return
+    }
 
-    const handleGsSave = async (e) => {
-        e.preventDefault();
-        if (!gsUrl) {
-            setGSheetsUrl('');
-            setIsGsConnected(false);
-            setGsStatus({ type: 'info', message: 'Sync disabled.' });
-            return;
-        }
-        setIsGsLoading(true);
-        setGsStatus({ type: 'info', message: 'Testing connection...' });
-        try {
-            const data = await fetchGSheetsPricing();
-            if (data) {
-                setGSheetsUrl(gsUrl);
-                updateDynamicPricing(data.pricingTiers, data.products);
-                setGsStatus({ type: 'success', message: 'Connected to Google Sheets!' });
-                setIsGsConnected(true);
-                if (onDataLoaded) onDataLoaded();
-            } else {
-                setGsStatus({ type: 'error', message: 'Failed to fetch data.' });
-            }
-        } catch (err) {
-            setGsStatus({ type: 'error', message: err.message });
-        } finally { setIsGsLoading(false); }
-    };
+    updateDynamicPricing(data.pricingTiers, data.products)
 
-    const handleAtSave = async (e) => {
-        e.preventDefault();
-        if (!atToken || !atBaseId) {
-            setAirtableConfig({ token: '', baseId: '' });
-            setIsAtConnected(false);
-            setAtStatus({ type: 'info', message: 'Sync disabled.' });
-            return;
-        }
-        setIsAtLoading(true);
-        setAtStatus({ type: 'info', message: 'Testing connection...' });
-        try {
-            setAirtableConfig({ token: atToken, baseId: atBaseId });
-            const test = await testAirtable();
-            if (test.success) {
-                const data = await fetchAirtablePricing();
-                if (data) updateDynamicPricing(data.pricingTiers, data.products);
-                setAtStatus({ type: 'success', message: 'Connected to Airtable!' });
-                setIsAtConnected(true);
-                if (onDataLoaded) onDataLoaded();
-            } else {
-                setAtStatus({ type: 'error', message: test.error });
-            }
-        } catch (err) {
-            setAtStatus({ type: 'error', message: err.message });
-        } finally { setIsAtLoading(false); }
-    };
+    if (data.products && Object.keys(data.products).length > 0) {
+      const mergedProducts = mergeRemoteProducts(loadProducts(), data.products)
+      saveProducts(mergedProducts)
+      onProductsUpdated?.(mergedProducts)
+    }
+  }
 
-    const statusStyle = (type) => ({
-        marginBottom: '1rem', padding: '0.75rem', background: '#f8f8f8',
-        borderLeft: `3px solid ${type === 'success' ? 'var(--huel-blue)' : 'var(--huel-pink)'}`,
-        fontSize: '0.85rem'
-    });
+  const handleSaveAndTest = async (event) => {
+    event.preventDefault()
 
-    return (
-        <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <ProductCatalogue onProductsUpdated={onProductsUpdated} />
+    if (!token || !baseId) {
+      setConfig({ token: '', baseId: '' })
+      setNotice({
+        tone: 'warning',
+        message: 'Airtable credentials cleared. The dashboard will keep using the local catalogue until you reconnect.',
+      })
+      refreshStatus()
+      return
+    }
 
-            {/* Google Sheets Section */}
-            <div className="glass-card">
-                <div style={{ height: '3px', background: isGsConnected ? 'var(--huel-blue)' : 'var(--huel-mid-gray)', margin: '-1.5rem -1.5rem 1.5rem -1.5rem' }} />
-                <h3 className="mb-4">Google Sheets Connection</h3>
-                <form onSubmit={handleGsSave}>
-                    <div className="form-group mb-4">
-                        <label className="form-label">Apps Script Web App URL</label>
-                        <input type="url" value={gsUrl} onChange={e => setGsUrl(e.target.value)} className="form-input" placeholder="https://script.google.com/..." />
-                    </div>
-                    {gsStatus && <div style={statusStyle(gsStatus.type)}>{gsStatus.message}</div>}
-                    <button type="submit" className="btn btn-primary" disabled={isGsLoading}>{isGsLoading ? 'Connecting...' : 'Save & Test'}</button>
-                </form>
-            </div>
+    setIsTesting(true)
+    setNotice({ tone: 'info', message: 'Testing Airtable connection and refreshing pricing...' })
 
-            {/* Airtable Section */}
-            <div className="glass-card">
-                <div style={{ height: '3px', background: isAtConnected ? 'var(--huel-blue)' : 'var(--huel-mid-gray)', margin: '-1.5rem -1.5rem 1.5rem -1.5rem' }} />
-                <h3 className="mb-4">Airtable Connection</h3>
-                <form onSubmit={handleAtSave}>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label className="form-label">Personal Access Token</label>
-                            <input type="password" value={atToken} onChange={e => setAtToken(e.target.value)} className="form-input" placeholder="pat..." />
-                        </div>
-                        <div>
-                            <label className="form-label">Base ID</label>
-                            <input type="text" value={atBaseId} onChange={e => setAtBaseId(e.target.value)} className="form-input" placeholder="app..." />
-                        </div>
-                    </div>
-                    {atStatus && <div style={statusStyle(atStatus.type)}>{atStatus.message}</div>}
-                    <button type="submit" className="btn btn-primary" disabled={isAtLoading}>{isAtLoading ? 'Connecting...' : 'Save & Test'}</button>
-                </form>
-            </div>
+    try {
+      setConfig({ token, baseId })
 
-            {/* Schema Guide */}
-            <div className="glass-card">
-                <button onClick={() => setShowGuide(!showGuide)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0 }}>
-                    <h3 style={{ margin: 0 }}>{showGuide ? '▲' : '▼'} Airtable Base Setup Guide</h3>
-                </button>
-                {showGuide && (
-                    <div style={{ marginTop: '1.25rem' }}>
-                        <SchemaTable title="Table: Retailers" rows={[['Name', 'Text', 'Primary'], ['Client Type', 'Select', 'Vending | Airport | Food Service'], ['Synced At', 'Date', 'Auto']]} />
-                        <SchemaTable title="Table: Products" rows={[['Retailer', 'Link', 'Linked to Retailers'], ['Product Name', 'Select', 'Huel BE RTD | Huel DG RTD'], ['Num Stores', 'Number', ''], ['Base Velocity', 'Number', '']]} />
-                    </div>
-                )}
-            </div>
+      const result = await testConnection()
+      if (!result.success) {
+        setNotice({ tone: 'error', message: result.error })
+        refreshStatus()
+        return
+      }
+
+      const pricing = await fetchPricingData()
+      applyRemotePricing(pricing)
+      refreshStatus()
+      setNotice({
+        tone: 'success',
+        message: pricing
+          ? 'Airtable connected. Pricing has been refreshed and the catalogue was updated where remote SKU data exists.'
+          : 'Airtable connected, but no pricing rows were returned.',
+      })
+    } catch (error) {
+      setNotice({ tone: 'error', message: error.message })
+      refreshStatus()
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+  const handleRefreshPricing = async () => {
+    if (!token || !baseId) {
+      setNotice({ tone: 'warning', message: 'Enter an Airtable token and base ID before refreshing pricing.' })
+      return
+    }
+
+    setIsRefreshing(true)
+    setNotice({ tone: 'info', message: 'Refreshing pricing from Airtable...' })
+
+    try {
+      setConfig({ token, baseId })
+      const pricing = await fetchPricingData()
+
+      if (!pricing) {
+        setNotice({ tone: 'error', message: 'Pricing refresh failed. Check the Airtable setup guide below.' })
+        refreshStatus()
+        return
+      }
+
+      applyRemotePricing(pricing)
+      refreshStatus()
+      setNotice({ tone: 'success', message: 'Pricing refreshed from Airtable.' })
+    } catch (error) {
+      setNotice({ tone: 'error', message: error.message })
+      refreshStatus()
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const handleClearConfig = () => {
+    setConfig({ token: '', baseId: '' })
+    setToken('')
+    setBaseId('')
+    setNotice({
+      tone: 'warning',
+      message: 'Saved Airtable credentials removed. Existing local data remains available.',
+    })
+    refreshStatus()
+  }
+
+  const isConfigured = Boolean(token && baseId)
+
+  return (
+    <div className="view-stack settings-layout">
+      <header className="view-header">
+        <div>
+          <p className="eyebrow">Operations setup</p>
+          <h1>Settings</h1>
+          <p className="view-header__copy">
+            Airtable is the only sync target in this build. Pricing can refresh from Airtable, and retailer sync writes the
+            expanded workflow fields required by the commercial dashboard.
+          </p>
         </div>
-    );
+      </header>
+
+      <section className="settings-grid">
+        <article className="glass-card settings-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Airtable sync</p>
+              <h2>Connection and pricing refresh</h2>
+              <p className="view-header__copy">
+                Save credentials once, then use Airtable as the source of truth for dynamic RTM pricing and synced retailer records.
+              </p>
+            </div>
+
+            <span className={`tone-pill tone-pill--${isConfigured ? 'success' : 'neutral'}`}>
+              {isConfigured ? 'Configured' : 'Not configured'}
+            </span>
+          </div>
+
+          <form className="client-form" onSubmit={handleSaveAndTest}>
+            <div className="form-grid form-grid--two">
+              <label className="field-group">
+                <span className="form-label">Personal access token</span>
+                <input
+                  className="form-input"
+                  type="password"
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                  placeholder="pat..."
+                />
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Base ID</span>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={baseId}
+                  onChange={(event) => setBaseId(event.target.value)}
+                  placeholder="app..."
+                />
+              </label>
+            </div>
+
+            <StatusNotice notice={notice} />
+
+            <div className="settings-actions">
+              <button type="submit" className="btn btn-primary" disabled={isTesting}>
+                {isTesting ? 'Testing...' : 'Save and test'}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={handleRefreshPricing} disabled={isRefreshing}>
+                {isRefreshing ? 'Refreshing...' : 'Refresh pricing'}
+              </button>
+              <button type="button" className="btn btn-secondary btn-danger" onClick={handleClearConfig}>
+                Clear credentials
+              </button>
+            </div>
+          </form>
+        </article>
+
+        <article className="glass-card settings-panel status-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Data status</p>
+              <h2>What the app last heard from Airtable</h2>
+            </div>
+          </div>
+
+          <div className="status-panel__grid">
+            <div className="status-panel__item">
+              <span>Pricing source</span>
+              <strong>{dataStatus.pricing.source || 'Local catalogue'}</strong>
+            </div>
+            <div className="status-panel__item">
+              <span>Last pricing refresh</span>
+              <strong>{formatTimestamp(dataStatus.pricing.lastSuccessAt)}</strong>
+            </div>
+            <div className="status-panel__item">
+              <span>Last pricing error</span>
+              <strong>{dataStatus.pricing.lastError || 'None recorded'}</strong>
+            </div>
+            <div className="status-panel__item">
+              <span>Last client sync target</span>
+              <strong>{dataStatus.clientSync.target || 'Not yet synced'}</strong>
+            </div>
+            <div className="status-panel__item">
+              <span>Last client sync</span>
+              <strong>{formatTimestamp(dataStatus.clientSync.lastSuccessAt)}</strong>
+            </div>
+            <div className="status-panel__item">
+              <span>Last sync error</span>
+              <strong>{dataStatus.clientSync.lastError || 'None recorded'}</strong>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <ProductCatalogue onProductsUpdated={onProductsUpdated} />
+
+      <section className="glass-card settings-panel">
+        <button type="button" className="schema-toggle" onClick={() => setShowGuide((isOpen) => !isOpen)}>
+          <span>
+            <p className="eyebrow">Airtable schema</p>
+            <h2>Base setup guide</h2>
+          </span>
+          <strong>{showGuide ? 'Hide guide' : 'Show guide'}</strong>
+        </button>
+
+        {showGuide && (
+          <div className="schema-grid">
+            <SchemaTable title="Retailers table" rows={RETAILER_SCHEMA} />
+            <SchemaTable title="Products table" rows={PRODUCT_SCHEMA} />
+            <SchemaTable title="Pricing Config table" rows={PRICING_SCHEMA} />
+          </div>
+        )}
+      </section>
+    </div>
+  )
 }

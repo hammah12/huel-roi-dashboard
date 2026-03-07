@@ -1,153 +1,203 @@
 export let PRICING_TIERS = {
-  "DSD": 2.39,
-  "Distributor": 2.52,
-  "Direct to Retailer": 2.85,
-  "Wholesale": 3.00
-};
+  DSD: 2.39,
+  Distributor: 2.52,
+  'Direct to Retailer': 2.85,
+  Wholesale: 3.0,
+}
 
 export let PRODUCTS = {
-  "Huel BE RTD": { cogs: 1.42, defaultSrp: 4.99 },
-  "Huel DG RTD": { cogs: 0.77, defaultSrp: 3.49 }
-};
+  'Huel BE RTD': { cogs: 1.42, defaultSrp: 4.99 },
+  'Huel DG RTD': { cogs: 0.77, defaultSrp: 3.49 },
+}
+
+const DEFAULT_PRODUCT = 'Huel BE RTD'
+const DEFAULT_ROUTE_TO_MARKET = 'DSD'
 
 export function updateDynamicPricing(pricingData, productData) {
   if (pricingData && Object.keys(pricingData).length > 0) {
-    PRICING_TIERS = { ...PRICING_TIERS, ...pricingData };
+    PRICING_TIERS = { ...PRICING_TIERS, ...pricingData }
   }
   if (productData && Object.keys(productData).length > 0) {
-    PRODUCTS = { ...PRODUCTS, ...productData };
+    PRODUCTS = { ...PRODUCTS, ...productData }
   }
 }
 
-export function calculateROI(clientData) {
-  const productsList = clientData.products || [clientData];
+export function getProductsList(clientData) {
+  return clientData?.products?.length ? clientData.products : [clientData]
+}
 
-  // RTM is now per-product; keep a fallback for legacy top-level routeToMarket
-  const legacyRtm = clientData.routeToMarket || 'DSD';
+export function getProductDefinition(productName) {
+  return PRODUCTS[productName] || PRODUCTS[DEFAULT_PRODUCT]
+}
 
-  // Account-level rebate — stored as a % of Huel gross revenue
-  const rebatePct = Number(clientData.rebate) / 100 || 0;
+export function getRouteToMarketPrice(routeToMarket) {
+  return PRICING_TIERS[routeToMarket] || PRICING_TIERS['Direct to Retailer']
+}
 
-  // Vending revenue-share deal flag
+export function getProductPricing(product, clientData = {}) {
+  const productDef = getProductDefinition(product?.productName)
+  const routeToMarket = product?.routeToMarket || clientData?.routeToMarket || DEFAULT_ROUTE_TO_MARKET
+
+  return {
+    productDef,
+    routeToMarket,
+    huelUnitPrice: getRouteToMarketPrice(routeToMarket),
+  }
+}
+
+export function getPrimaryRouteToMarket(clientData = {}) {
+  const routes = Array.from(
+    new Set(
+      getProductsList(clientData)
+        .map((product) => product?.routeToMarket || clientData?.routeToMarket || DEFAULT_ROUTE_TO_MARKET)
+        .filter(Boolean),
+    ),
+  )
+
+  if (routes.length === 0) {
+    return DEFAULT_ROUTE_TO_MARKET
+  }
+
+  return routes.length === 1 ? routes[0] : 'Mixed'
+}
+
+export function calculateROI(clientData = {}) {
+  const productsList = getProductsList(clientData)
+  const legacyRtm = clientData.routeToMarket || DEFAULT_ROUTE_TO_MARKET
+
+  const rebatePct = Number(clientData.rebate) / 100 || 0
   const isRevenueShare =
     clientData.clientType === 'Vending' &&
-    clientData.dealType === 'revenue_share';
+    clientData.dealType === 'revenue_share'
 
-  const revenueSharePct = Number(clientData.revenueSharePct) / 100 || 0;
-  const revenueShareMinMonthly = Number(clientData.revenueShareMin) || 0;
-  const revenueShareMin = revenueShareMinMonthly * 12; // annualise for Year 1 comparison
+  const revenueSharePct = Number(clientData.revenueSharePct) / 100 || 0
+  const revenueShareMinMonthly = Number(clientData.revenueShareMin) || 0
+  const revenueShareMin = revenueShareMinMonthly * 12
 
-  let totalYear1GrossRevenue = 0;
-  let totalYear1GrossProfit = 0;
-  let totalTradeExpenses = 0;
-  let totalMachineCost = 0;
+  let totalYear1GrossRevenue = 0
+  let totalYear1GrossProfit = 0
+  let totalTradeExpenses = 0
+  let totalMachineCost = 0
 
-  let totalRetailerYear1Revenue = 0;
-  let totalRetailerCost = 0;
-  let totalPartnerPayout = 0;
+  let totalRetailerYear1Revenue = 0
+  let totalRetailerCost = 0
+  let totalPartnerPayout = 0
+  let totalAnnualUnitsAcrossProducts = 0
 
-  let totalAnnualUnitsAcrossProducts = 0;
+  const tradeBreakdown = {
+    slottingFixed: 0,
+    freeFill: 0,
+    tprs: 0,
+    marketing: 0,
+    machineCost: 0,
+    partnerPayout: 0,
+    rebate: 0,
+    total: 0,
+  }
 
-  productsList.forEach(prod => {
-    const productDef = PRODUCTS[prod.productName] || PRODUCTS["Huel BE RTD"];
+  productsList.forEach((product, index) => {
+    const productDef = getProductDefinition(product?.productName)
+    const { huelUnitPrice } = getProductPricing(
+      { ...product, routeToMarket: product?.routeToMarket || legacyRtm },
+      clientData,
+    )
 
-    // Per-product RTM price (falls back to legacy top-level RTM)
-    const huelUnitPrice = PRICING_TIERS[prod.routeToMarket || legacyRtm] || 2.85;
+    const stores = Number(product?.numStores) || 0
+    const velocity = Number(product?.baseVelocity) || 0
+    const priceSrp = Number(product?.srp) || productDef.defaultSrp
+    const totalAnnualUnits = stores * velocity * 52
 
-    const stores = Number(prod.numStores) || 0;
-    const velocity = Number(prod.baseVelocity) || 0;
-    const priceSRP = Number(prod.srp) || productDef.defaultSrp;
+    totalAnnualUnitsAcrossProducts += totalAnnualUnits
 
-    const totalAnnualUnits = stores * velocity * 52;
-    totalAnnualUnitsAcrossProducts += totalAnnualUnits;
-
-    // ── Huel Revenue & Gross Profit ──────────────────────────────────
-    let year1GrossRevenue;
-    let year1GrossProfit;
+    let year1GrossRevenue
+    let year1GrossProfit
 
     if (isRevenueShare) {
-      // Revenue Share vending deal:
-      //   Huel owns the retail sales; partner is paid MAX(annual min, split% × sales).
-      //   The partner payout is a trade cost, not a revenue reduction.
-      const retailerGrossSales = totalAnnualUnits * priceSRP;
-      year1GrossRevenue = retailerGrossSales; // Huel earns full retail sales
+      const retailerGrossSales = totalAnnualUnits * priceSrp
+      const totalCogs = totalAnnualUnits * productDef.cogs
 
-      // COGS based on units manufactured
-      const totalCOGS = totalAnnualUnits * productDef.cogs;
-      year1GrossProfit = year1GrossRevenue - totalCOGS;
+      year1GrossRevenue = retailerGrossSales
+      year1GrossProfit = retailerGrossSales - totalCogs
     } else {
-      // Standard RTM per-unit pricing
-      const weeklyRevenue = stores * velocity * huelUnitPrice;
-      year1GrossRevenue = weeklyRevenue * 52;
+      const weeklyRevenue = stores * velocity * huelUnitPrice
+      const marginPercent = (huelUnitPrice - productDef.cogs) / huelUnitPrice
 
-      const marginPercent = (huelUnitPrice - productDef.cogs) / huelUnitPrice;
-      year1GrossProfit = year1GrossRevenue * marginPercent;
+      year1GrossRevenue = weeklyRevenue * 52
+      year1GrossProfit = year1GrossRevenue * marginPercent
     }
 
-    // ── Machine Costs (Vending only) ────────────────────────────────
-    //   Both machineCostPerUnit and numMachines are now deal-level fields.
-    //   Machine cost is only added once (on the first product iteration) to
-    //   avoid double-counting when there are multiple products on the same deal.
-    const machineCostPerUnit = Number(clientData.machineCostPerUnit || 0);
-    const machineCount = Number(clientData.numMachines) || 0;
-    const machineCost = prod === productsList[0] ? machineCostPerUnit * machineCount : 0;
-    totalMachineCost += machineCost;
+    const machineCostPerUnit = Number(clientData.machineCostPerUnit || 0)
+    const machineCount = Number(clientData.numMachines) || 0
+    const machineCost = index === 0 ? machineCostPerUnit * machineCount : 0
 
-    // ── Partner Payout (Revenue Share deals only) ────────────────────
-    //   Huel pays the partner MAX(annual floor, split% × retail sales).
-    //   Computed once on the first product to avoid double-counting.
-    let partnerPayout = 0;
-    if (isRevenueShare && prod === productsList[0]) {
-      const retailSales = totalAnnualUnits * priceSRP;
-      const splitAmount = retailSales * revenueSharePct;
-      partnerPayout = Math.max(revenueShareMin, splitAmount);
+    let partnerPayout = 0
+    if (isRevenueShare && index === 0) {
+      const retailSales = totalAnnualUnits * priceSrp
+      const splitAmount = retailSales * revenueSharePct
+      partnerPayout = Math.max(revenueShareMin, splitAmount)
     }
 
-    // ── Trade Expenses (rebate calculated after loop on total revenue) ──
-    const freeFillValue = Number(prod.slottingFreeFillQty || 0) * huelUnitPrice;
+    const slottingFixed = Number(product?.slottingFixed) || 0
+    const freeFillValue = (Number(product?.slottingFreeFillQty) || 0) * huelUnitPrice
+    const tprs = Number(product?.tprs) || 0
+    const marketing = Number(product?.marketing) || 0
+
     const tradeExpenses =
-      Number(prod.slottingFixed || 0) +
+      slottingFixed +
       freeFillValue +
-      Number(prod.tprs || 0) +
-      Number(prod.marketing || 0) +
-      machineCost +    // machine capex (first product only)
-      partnerPayout;   // partner revenue share payout (first product only)
+      tprs +
+      marketing +
+      machineCost +
+      partnerPayout
 
-    totalYear1GrossRevenue += year1GrossRevenue;
-    totalYear1GrossProfit += year1GrossProfit;
-    totalTradeExpenses += tradeExpenses;
-    totalPartnerPayout += partnerPayout;
+    tradeBreakdown.slottingFixed += slottingFixed
+    tradeBreakdown.freeFill += freeFillValue
+    tradeBreakdown.tprs += tprs
+    tradeBreakdown.marketing += marketing
+    tradeBreakdown.machineCost += machineCost
+    tradeBreakdown.partnerPayout += partnerPayout
 
-    // ── Retailer ROI ─────────────────────────────────────────────────
-    const retailerYear1Revenue = totalAnnualUnits * priceSRP;
+    totalYear1GrossRevenue += year1GrossRevenue
+    totalYear1GrossProfit += year1GrossProfit
+    totalTradeExpenses += tradeExpenses
+    totalMachineCost += machineCost
+    totalPartnerPayout += partnerPayout
+
+    const retailerYear1Revenue = totalAnnualUnits * priceSrp
     const retailerCost = isRevenueShare
-      ? year1GrossRevenue                       // retailer pays Huel the share amount
-      : stores * velocity * huelUnitPrice * 52; // retailer buys at RTM price
+      ? year1GrossRevenue
+      : stores * velocity * huelUnitPrice * 52
 
-    totalRetailerYear1Revenue += retailerYear1Revenue;
-    totalRetailerCost += retailerCost;
-  });
+    totalRetailerYear1Revenue += retailerYear1Revenue
+    totalRetailerCost += retailerCost
+  })
 
-  // Rebate = % of total gross revenue, added to trade costs after loop
-  const totalRebate = totalYear1GrossRevenue * rebatePct;
-  totalTradeExpenses += totalRebate;
+  const totalRebate = totalYear1GrossRevenue * rebatePct
+  totalTradeExpenses += totalRebate
+  tradeBreakdown.rebate = totalRebate
+  tradeBreakdown.total = totalTradeExpenses
 
-  const totalYear1Ebitda = totalYear1GrossProfit - totalTradeExpenses;
+  const totalYear1Ebitda = totalYear1GrossProfit - totalTradeExpenses
   const ebitdaMarginPercent = totalYear1GrossRevenue > 0
-    ? totalYear1Ebitda / totalYear1GrossRevenue : 0;
+    ? totalYear1Ebitda / totalYear1GrossRevenue
+    : 0
   const productMarginPercent = totalYear1GrossRevenue > 0
-    ? totalYear1GrossProfit / totalYear1GrossRevenue : 0;
+    ? totalYear1GrossProfit / totalYear1GrossRevenue
+    : 0
 
-  const monthlyGrossProfit = totalYear1GrossProfit / 12;
+  const monthlyGrossProfit = totalYear1GrossProfit / 12
   const breakevenMonths = monthlyGrossProfit > 0
-    ? totalTradeExpenses / monthlyGrossProfit : 0;
+    ? totalTradeExpenses / monthlyGrossProfit
+    : 0
 
   const tradeRatePercent = totalYear1GrossRevenue > 0
-    ? totalTradeExpenses / totalYear1GrossRevenue : 0;
+    ? totalTradeExpenses / totalYear1GrossRevenue
+    : 0
 
-  const retailerGrossProfit = totalRetailerYear1Revenue - totalRetailerCost;
+  const retailerGrossProfit = totalRetailerYear1Revenue - totalRetailerCost
   const retailerMarginPercent = totalRetailerYear1Revenue > 0
-    ? retailerGrossProfit / totalRetailerYear1Revenue : 0;
+    ? retailerGrossProfit / totalRetailerYear1Revenue
+    : 0
 
   return {
     huel: {
@@ -167,14 +217,19 @@ export function calculateROI(clientData) {
       tradeRatePercent,
       isRevenueShare,
       revenueSharePct,
-      revenueShareMinMonthly, // monthly floor (as entered)
-      revenueShareMin,        // annualised (× 12) used in calculation
+      revenueShareMinMonthly,
+      revenueShareMin,
+      tradeBreakdown,
     },
     retailer: {
       year1Revenue: totalRetailerYear1Revenue,
       cost: totalRetailerCost,
       grossProfit: retailerGrossProfit,
-      marginPercent: retailerMarginPercent
-    }
-  };
+      marginPercent: retailerMarginPercent,
+    },
+  }
+}
+
+export function calculateTradeBreakdown(clientData = {}) {
+  return calculateROI(clientData).huel.tradeBreakdown
 }

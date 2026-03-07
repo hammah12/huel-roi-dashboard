@@ -1,203 +1,293 @@
-import React, { useState, useEffect } from 'react';
-import DashboardOverview from './components/DashboardOverview';
-import ClientForm from './components/ClientForm';
-import PlacementsForecast from './components/PlacementsForecast';
-import Settings from './components/Settings';
-import { getConfig as getAirtableConfig, fetchPricingData as fetchAirtablePricing, syncClientToAirtable } from './utils/airtableSync';
-import { getSyncUrl as getGSheetsUrl, fetchPricingData as fetchGSheetsPricing, syncClientToSheet } from './utils/googleSheetsSync';
-import { updateDynamicPricing } from './utils/calculations';
-import { loadProducts, saveProducts } from './components/Settings';
+import { useEffect, useState } from 'react'
+import DashboardOverview from './components/DashboardOverview'
+import ClientForm from './components/ClientForm'
+import PlacementsForecast from './components/PlacementsForecast'
+import PortfolioFilters from './components/PortfolioFilters'
+import Settings from './components/Settings'
+import {
+  fetchPricingData as fetchAirtablePricing,
+  getConfig as getAirtableConfig,
+  syncClientToAirtable,
+} from './utils/airtableSync'
+import { createEmptyClient, loadClients, saveClients } from './utils/clientStore'
+import { markPricingFetchFailure } from './utils/dataStatus'
+import { filterClients, getFilterOptions } from './utils/portfolio'
+import {
+  loadProducts,
+  mergeRemoteProducts,
+  toProductMap,
+} from './utils/productCatalog'
+import { updateDynamicPricing } from './utils/calculations'
+
+const DEFAULT_FILTERS = {
+  search: '',
+  status: 'all',
+  clientType: 'all',
+  owner: 'all',
+  priority: 'all',
+  routeToMarket: 'all',
+  health: 'all',
+}
 
 function App() {
-  const [clients, setClients] = useState(() => {
-    const saved = localStorage.getItem('huelClients');
-    return saved ? JSON.parse(saved) : [];
-  });
   const [availableProducts, setAvailableProducts] = useState(() => {
-    const products = loadProducts();
-    // Sync into calculations module on first load
-    const productMap = {};
-    products.forEach(p => { productMap[p.name] = { cogs: Number(p.cogs), defaultSrp: Number(p.defaultSrp) }; });
-    updateDynamicPricing({}, productMap);
-    return products;
-  });
-  const [view, setView] = useState('dashboard');
-  const [editingClientIndex, setEditingClientIndex] = useState(null);
+    const products = loadProducts()
+    updateDynamicPricing({}, toProductMap(products))
+    return products
+  })
+  const [clients, setClients] = useState(() => loadClients(loadProducts()))
+  const [view, setView] = useState('dashboard')
+  const [editingClientIndex, setEditingClientIndex] = useState(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [filters, setFilters] = useState(DEFAULT_FILTERS)
 
-  // Attempt to fetch dynamic pricing on app load
   useEffect(() => {
     async function loadPricing() {
-      // 1. Try Google Sheets first (most recent)
-      if (getGSheetsUrl()) {
-        try {
-          const data = await fetchGSheetsPricing();
-          if (data) {
-            updateDynamicPricing(data.pricingTiers, data.products);
-            return; // Exit if GSheets succeeds
-          }
-        } catch (e) { console.warn("GSheets fetch failed", e); }
+      if (!getAirtableConfig()) {
+        return
       }
 
-      // 2. Fallback to Airtable
-      if (getAirtableConfig()) {
-        try {
-          const data = await fetchAirtablePricing();
-          if (data) updateDynamicPricing(data.pricingTiers, data.products);
-        } catch (e) { console.warn("Airtable fetch failed", e); }
+      try {
+        const data = await fetchAirtablePricing()
+        if (!data) {
+          return
+        }
+
+        updateDynamicPricing(data.pricingTiers, data.products)
+        if (data.products) {
+          setAvailableProducts((currentProducts) => mergeRemoteProducts(currentProducts, data.products))
+        }
+      } catch (error) {
+        console.warn('Airtable fetch failed', error)
+        markPricingFetchFailure('Airtable', error.message)
       }
     }
-    loadPricing();
-  }, []);
+
+    loadPricing()
+  }, [])
+
+  const persistClients = (nextClients, updatedIndexes = null) => {
+    const savedClients = saveClients(nextClients, availableProducts, updatedIndexes)
+    setClients(savedClients)
+    return savedClients
+  }
 
   const handleSaveClient = async (clientData) => {
-    let newClients;
+    let nextClients
+    let updatedIndexes
+
     if (editingClientIndex !== null) {
-      newClients = [...clients];
-      newClients[editingClientIndex] = clientData;
+      nextClients = [...clients]
+      nextClients[editingClientIndex] = clientData
+      updatedIndexes = [editingClientIndex]
     } else {
-      newClients = [...clients, clientData];
-    }
-    setClients(newClients);
-    localStorage.setItem('huelClients', JSON.stringify(newClients));
-    setView('dashboard');
-    setEditingClientIndex(null);
-
-    // Sync to Google Sheets if configured
-    if (getGSheetsUrl()) {
-      await syncClientToSheet(clientData);
+      nextClients = [...clients, clientData]
+      updatedIndexes = [nextClients.length - 1]
     }
 
-    // Sync to Airtable if configured
+    const savedClients = persistClients(nextClients, updatedIndexes)
+    const savedClient = editingClientIndex !== null
+      ? savedClients[editingClientIndex]
+      : savedClients[savedClients.length - 1]
+
+    setView('dashboard')
+    setEditingClientIndex(null)
+
     if (getAirtableConfig()) {
-      await syncClientToAirtable(clientData);
+      await syncClientToAirtable(savedClient)
     }
-  };
+  }
 
   const handleEditClient = (index) => {
-    setEditingClientIndex(index);
-    setView('add_client');
-  };
+    setEditingClientIndex(index)
+    setView('add_client')
+    setMobileNavOpen(false)
+  }
 
   const handleDuplicateClient = (index) => {
-    const duplicated = { ...clients[index], retailerName: `${clients[index].retailerName} (Copy)` };
-    const newClients = [...clients, duplicated];
-    setClients(newClients);
-    localStorage.setItem('huelClients', JSON.stringify(newClients));
-  };
+    const duplicated = createEmptyClient(availableProducts)
+    const source = clients[index]
+    const nextClients = [
+      ...clients,
+      {
+        ...duplicated,
+        ...source,
+        retailerName: `${source.retailerName} (Copy)`,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ]
+
+    persistClients(nextClients, [nextClients.length - 1])
+  }
 
   const handleRemoveClient = (index) => {
-    if (window.confirm('Are you sure you want to remove this retailer profile?')) {
-      const newClients = clients.filter((_, i) => i !== index);
-      setClients(newClients);
-      localStorage.setItem('huelClients', JSON.stringify(newClients));
+    if (!window.confirm('Are you sure you want to remove this retailer profile?')) {
+      return
     }
-  };
+
+    const nextClients = clients.filter((_, clientIndex) => clientIndex !== index)
+    persistClients(nextClients, [])
+  }
 
   const handleConvertLead = (index) => {
-    const newClients = [...clients];
-    newClients[index] = { ...newClients[index], pipelineStatus: 'Closed' };
-    setClients(newClients);
-    localStorage.setItem('huelClients', JSON.stringify(newClients));
-  };
+    const nextClients = [...clients]
+    nextClients[index] = {
+      ...nextClients[index],
+      pipelineStatus: 'Closed',
+      winProbability: '100',
+    }
+    persistClients(nextClients, [index])
+  }
+
+  const handleUpdateClient = (index, updates) => {
+    const nextClients = [...clients]
+    nextClients[index] = { ...nextClients[index], ...updates }
+    persistClients(nextClients, [index])
+  }
 
   const handleCancel = () => {
-    setView('dashboard');
-    setEditingClientIndex(null);
-  };
+    setView('dashboard')
+    setEditingClientIndex(null)
+  }
+
+  const handleFilterChange = (field, value) => {
+    setFilters((currentFilters) => ({ ...currentFilters, [field]: value }))
+  }
+
+  const handleClearFilters = () => {
+    setFilters(DEFAULT_FILTERS)
+  }
+
+  const filteredClients = filterClients(clients, filters)
+  const filteredRecords = clients
+    .map((client, index) => ({ client, index }))
+    .filter(({ client }) => filteredClients.includes(client))
+
+  const filterOptions = getFilterOptions(clients)
+  const hasActiveFilters = Object.entries(filters).some(([, value]) => value !== '' && value !== 'all')
+  const liveCount = clients.filter((client) => client.pipelineStatus === 'Closed').length
+  const pipelineCount = clients.length - liveCount
+  const showFilters = view === 'dashboard' || view === 'placements'
+
+  const navigation = [
+    { id: 'dashboard', label: 'Dashboard Overview', meta: `${liveCount} live` },
+    { id: 'add_client', label: '+ Add New Retailer', meta: 'Deal builder' },
+    { id: 'placements', label: 'Placements Forecast', meta: `${pipelineCount} pipeline` },
+    { id: 'settings', label: 'Settings', meta: 'Airtable + catalogue' },
+  ]
 
   return (
-    <div className="app-container">
-      {/* Sidebar Navigation */}
-      <aside className="sidebar">
-        {/* Huel wordmark */}
-        <div style={{ marginBottom: '2.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-            {/* Huel "H" mark */}
-            <div style={{
-              width: 32, height: 32,
-              background: 'var(--huel-green)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '1.1rem',
-              color: 'var(--huel-dark)', flexShrink: 0
-            }}>H</div>
-            <h2 style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: '1.125rem', color: 'var(--huel-light)', margin: 0 }}>
-              Huel ROI
-            </h2>
+    <div className="app-shell">
+      <button
+        type="button"
+        className={`sidebar-overlay ${mobileNavOpen ? 'is-visible' : ''}`}
+        aria-label="Close navigation"
+        onClick={() => setMobileNavOpen(false)}
+      />
+
+      <aside className={`sidebar ${mobileNavOpen ? 'is-open' : ''}`}>
+        <div className="brand-block">
+          <div className="brand-mark">H</div>
+          <div>
+            <h1>Huel ROI</h1>
+            <p>Commercial strategy cockpit</p>
           </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--huel-mid-gray)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Commercial Strategy
-          </p>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <button
-            className={`btn ${view === 'dashboard' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ justifyContent: 'flex-start' }}
-            onClick={() => setView('dashboard')}
-          >
-            Dashboard Overview
-          </button>
-          <button
-            className={`btn ${view === 'add_client' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ justifyContent: 'flex-start' }}
-            onClick={() => setView('add_client')}
-          >
-            + Add New Retailer
-          </button>
-          <button
-            className={`btn ${view === 'placements' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ justifyContent: 'flex-start' }}
-            onClick={() => setView('placements')}
-          >
-            Placements Forecast
-          </button>
-          <button
-            className={`btn ${view === 'settings' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ justifyContent: 'flex-start', marginTop: '2rem' }}
-            onClick={() => setView('settings')}
-          >
-            Settings
-          </button>
+        <nav className="sidebar-nav">
+          {navigation.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`sidebar-nav__button ${view === item.id ? 'is-active' : ''}`}
+              onClick={() => {
+                setView(item.id)
+                setMobileNavOpen(false)
+              }}
+            >
+              <span>{item.label}</span>
+              <small>{item.meta}</small>
+            </button>
+          ))}
         </nav>
       </aside>
 
-      {/* Main View Area */}
-      <main className="main-content">
-        {view === 'dashboard' && (
-          <DashboardOverview
-            clients={clients}
-            onEdit={handleEditClient}
-            onDuplicate={handleDuplicateClient}
-            onRemove={handleRemoveClient}
-            onConvert={handleConvertLead}
+      <div className="app-main">
+        <header className="mobile-topbar">
+          <button
+            type="button"
+            className="nav-toggle"
+            aria-label="Open navigation"
+            onClick={() => setMobileNavOpen(true)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+
+          <div className="mobile-topbar__brand">
+            <div className="brand-mark brand-mark--small">H</div>
+            <div>
+              <strong>Huel ROI</strong>
+              <small>Commercial ops</small>
+            </div>
+          </div>
+        </header>
+
+        {showFilters && (
+          <PortfolioFilters
+            filters={filters}
+            filteredCount={filteredClients.length}
+            totalCount={clients.length}
+            options={filterOptions}
+            onChange={handleFilterChange}
+            onClear={handleClearFilters}
           />
         )}
 
-        {view === 'add_client' && (
-          <ClientForm
-            onSave={handleSaveClient}
-            onCancel={handleCancel}
-            initialData={editingClientIndex !== null ? clients[editingClientIndex] : null}
-            availableProducts={availableProducts}
-          />
-        )}
+        <main className="main-content">
+          {view === 'dashboard' && (
+            <DashboardOverview
+              clientRecords={filteredRecords}
+              totalCount={clients.length}
+              hasActiveFilters={hasActiveFilters}
+              onEdit={handleEditClient}
+              onDuplicate={handleDuplicateClient}
+              onRemove={handleRemoveClient}
+            />
+          )}
 
-        {view === 'placements' && (
-          <PlacementsForecast
-            clients={clients}
-            onConvert={handleConvertLead}
-          />
-        )}
+          {view === 'add_client' && (
+            <ClientForm
+              onSave={handleSaveClient}
+              onCancel={handleCancel}
+              initialData={editingClientIndex !== null ? clients[editingClientIndex] : null}
+              availableProducts={availableProducts}
+            />
+          )}
 
-        {view === 'settings' && (
-          <Settings
-            onDataLoaded={() => setView('dashboard')}
-            onProductsUpdated={(products) => setAvailableProducts(products)}
-          />
-        )}
-      </main>
+          {view === 'placements' && (
+            <PlacementsForecast
+              clientRecords={filteredRecords}
+              totalCount={clients.length}
+              filters={filters}
+              hasActiveFilters={hasActiveFilters}
+              onConvert={handleConvertLead}
+              onEdit={handleEditClient}
+              onUpdateClient={handleUpdateClient}
+            />
+          )}
+
+          {view === 'settings' && (
+            <Settings
+              onProductsUpdated={(products) => setAvailableProducts(products)}
+            />
+          )}
+        </main>
+      </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App

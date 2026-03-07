@@ -1,482 +1,485 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react'
 
-import { DEFAULT_PRODUCTS } from './Settings';
+import { PRICING_TIERS, calculateROI } from '../utils/calculations'
+import {
+  CLIENT_TYPES,
+  FORECAST_QUARTERS,
+  PIPELINE_STATUSES,
+  PRIORITY_TIERS,
+  createEmptyClient,
+  createEmptyProduct,
+  defaultWinProbability,
+  normalizeClient,
+} from '../utils/clientStore'
+import { formatCompactCurrency, formatNumber, formatPercent } from '../utils/formatters'
+import { getClientHealth, getDataCompleteness } from '../utils/portfolio'
+import { DEFAULT_PRODUCTS } from '../utils/productCatalog'
+
+function buildInitialState(initialData, productList) {
+  if (initialData) {
+    return normalizeClient(initialData, productList)
+  }
+
+  return createEmptyClient(productList)
+}
 
 export default function ClientForm({ onSave, onCancel, initialData, availableProducts }) {
-    const productList = availableProducts || DEFAULT_PRODUCTS;
+  const productList = availableProducts?.length ? availableProducts : DEFAULT_PRODUCTS
+  const [formData, setFormData] = useState(() => buildInitialState(initialData, productList))
 
-    const emptyProduct = {
-        productName: productList[0]?.name || 'Huel BE RTD',
-        routeToMarket: 'DSD',
-        numStores: '',
-        baseVelocity: '',
-        srp: '',
-        slottingFixed: '',
-        slottingFreeFillQty: '',
-        tprs: '',
-        marketing: '',
-    };
+  useEffect(() => {
+    setFormData(buildInitialState(initialData, productList))
+  }, [initialData, productList])
 
-    const [formData, setFormData] = useState({
-        retailerName: '',
-        clientType: 'Vending',
-        pipelineStatus: 'Prospect',
-        rebate: '',
-        dealType: 'standard',
-        numMachines: '',
-        machineCostPerUnit: '',
-        revenueSharePct: '',
-        revenueShareMin: '',
-        products: [{ ...emptyProduct }]
-    });
+  const isVending = formData.clientType === 'Vending'
+  const isRevenueShare = isVending && formData.dealType === 'revenue_share'
 
-    useEffect(() => {
-        if (initialData) {
-            // Legacy: top-level routeToMarket — migrate down to each product
-            const legacyRtm = initialData.routeToMarket || 'DSD';
-            if (initialData.products) {
-                setFormData({
-                    dealType: 'standard',
-                    numMachines: '',
-                    machineCostPerUnit: '',
-                    revenueSharePct: '',
-                    revenueShareMin: '',
-                    rebate: '',
-                    pipelineStatus: 'Prospect',
-                    ...initialData,
-                    products: initialData.products.map(({ machineCostPerUnit: _mc, ...p }) => ({
-                        ...p,
-                        // If product doesn't have its own RTM yet, inherit from top-level
-                        routeToMarket: p.routeToMarket || legacyRtm,
-                    })),
-                });
-            } else {
-                const { retailerName, routeToMarket: _rtm, clientType, ...productData } = initialData;
-                setFormData({
-                    retailerName,
-                    clientType: clientType || 'Vending',
-                    pipelineStatus: 'Prospect',
-                    rebate: '',
-                    dealType: 'standard',
-                    numMachines: '',
-                    machineCostPerUnit: '',
-                    revenueSharePct: '',
-                    revenueShareMin: '',
-                    products: [{ routeToMarket: legacyRtm, ...productData }],
-                });
-            }
+  const handleGeneralChange = (event) => {
+    const { name, value } = event.target
+
+    setFormData((currentFormData) => {
+      if (name === 'pipelineStatus') {
+        const previousDefault = defaultWinProbability(currentFormData.pipelineStatus)
+        const shouldResetProbability =
+          currentFormData.winProbability === '' ||
+          Number(currentFormData.winProbability) === previousDefault
+
+        return {
+          ...currentFormData,
+          pipelineStatus: value,
+          winProbability: shouldResetProbability
+            ? String(defaultWinProbability(value))
+            : currentFormData.winProbability,
         }
-    }, [initialData]);
+      }
 
-    const handleGeneralChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
+      return { ...currentFormData, [name]: value }
+    })
+  }
 
-    const handleProductChange = (index, e) => {
-        const { name, value } = e.target;
-        setFormData(prev => {
-            const newProducts = [...prev.products];
-            newProducts[index] = { ...newProducts[index], [name]: value };
-            return { ...prev, products: newProducts };
-        });
-    };
+  const handleProductChange = (index, event) => {
+    const { name, value } = event.target
 
-    const addProduct = () => {
-        setFormData(prev => ({ ...prev, products: [...prev.products, { ...emptyProduct }] }));
-    };
+    setFormData((currentFormData) => ({
+      ...currentFormData,
+      products: currentFormData.products.map((product, productIndex) => (
+        productIndex === index ? { ...product, [name]: value } : product
+      )),
+    }))
+  }
 
-    const removeProduct = (index) => {
-        setFormData(prev => {
-            const newProducts = prev.products.filter((_, i) => i !== index);
-            return { ...prev, products: newProducts.length ? newProducts : [{ ...emptyProduct }] };
-        });
-    };
+  const addProduct = () => {
+    setFormData((currentFormData) => ({
+      ...currentFormData,
+      products: [...currentFormData.products, createEmptyProduct(productList)],
+    }))
+  }
 
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        onSave(formData);
-    };
+  const removeProduct = (index) => {
+    setFormData((currentFormData) => {
+      const nextProducts = currentFormData.products.filter((_, productIndex) => productIndex !== index)
+      return {
+        ...currentFormData,
+        products: nextProducts.length ? nextProducts : [createEmptyProduct(productList)],
+      }
+    })
+  }
 
-    const isVending = formData.clientType === 'Vending';
-    const isRevenueShare = isVending && formData.dealType === 'revenue_share';
+  const handleSubmit = (event) => {
+    event.preventDefault()
+    onSave(formData)
+  }
 
-    // Live weekly units preview
-    const shortName = (name = '') => {
-        const parts = name.split(' ');
-        return parts.length > 1 ? parts.slice(1).join(' ') : name;
-    };
-    const liveWeeklyBreakdown = formData.products
-        .map(p => ({
-            label: shortName(p.productName) || p.productName,
-            units: (Number(p.numStores) || 0) * (Number(p.baseVelocity) || 0),
-        }))
-        .filter(p => p.units > 0);
-    const totalLiveWeekly = liveWeeklyBreakdown.reduce((s, p) => s + p.units, 0);
+  const roi = calculateROI(formData)
+  const weightedRevenue = roi.huel.year1GrossRevenue * ((Number(formData.winProbability) || 0) / 100)
+  const weightedEbitda = roi.huel.year1Ebitda * ((Number(formData.winProbability) || 0) / 100)
+  const health = getClientHealth(formData)
+  const completeness = getDataCompleteness(formData)
+  const weeklyUnits = formData.products.reduce((sum, product) => (
+    sum + ((Number(product.numStores) || 0) * (Number(product.baseVelocity) || 0))
+  ), 0)
 
-    // Toggle button style helper
-    const toggleStyle = (active) => ({
-        padding: '0.45rem 1rem',
-        fontSize: '0.8rem',
-        fontFamily: 'var(--font-heading)',
-        fontWeight: 700,
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        border: '1px solid var(--huel-blue)',
-        cursor: 'pointer',
-        transition: 'background 0.15s',
-        background: active ? 'var(--huel-blue)' : 'transparent',
-        color: active ? '#fff' : 'var(--huel-blue)',
-    });
-
-    return (
-        <div className="glass-card" style={{ maxWidth: '800px', margin: '0 auto' }}>
-            {/* Huel accent strip */}
-            <div style={{ height: '3px', background: 'var(--huel-blue)', margin: '-1.5rem -1.5rem 1.5rem -1.5rem' }} />
-            <h2 style={{ color: 'var(--huel-dark)', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem', fontFamily: 'var(--font-heading)' }}>
-                {initialData ? 'Edit Retailer Configuration' : 'Add New Retailer Configuration'}
-            </h2>
-
-            <form onSubmit={handleSubmit}>
-                {/* ── 1. General Information ──────────────────────────────────── */}
-                <div className="form-group mb-6">
-                    <h3 className="mb-4">1. General Information</h3>
-                    <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-                        <div>
-                            <label className="form-label">Retailer / Account Name</label>
-                            <input
-                                type="text"
-                                name="retailerName"
-                                value={formData.retailerName}
-                                onChange={handleGeneralChange}
-                                className="form-input"
-                                placeholder="e.g. SFO Airport"
-                                required
-                            />
-                        </div>
-                        <div>
-                            <label className="form-label">Pipeline Status</label>
-                            <select name="pipelineStatus" value={formData.pipelineStatus} onChange={handleGeneralChange} className="form-select">
-                                <option value="Closed">Closed / Immediate</option>
-                                <option value="Hot Pipeline">Hot Pipeline</option>
-                                <option value="High Interest">High Interest</option>
-                                <option value="Prospect">Prospect</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="form-label">Client Type</label>
-                            <select name="clientType" value={formData.clientType} onChange={handleGeneralChange} className="form-select">
-                                <option value="Vending">Vending</option>
-                                <option value="Micromarket">Micromarket</option>
-                                <option value="Airport Concessions">Airport Concessions</option>
-                                <option value="Food Service">Food Service</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="form-label">Partner Rebate (%)</label>
-                            <input
-                                type="number"
-                                name="rebate"
-                                value={formData.rebate}
-                                onChange={handleGeneralChange}
-                                className="form-input"
-                                min="0"
-                                max="100"
-                                step="0.1"
-                                placeholder="e.g. 5"
-                            />
-                            <small style={{ display: 'block', marginTop: '4px', fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
-                                % of Huel's gross revenue paid back to partner as a rebate.
-                            </small>
-                        </div>
-                    </div>
-                </div>
-
-                {/* ── 2. Vending Deal Structure (only for Vending) ────────────── */}
-                {isVending && (
-                    <div className="mb-6" style={{ backgroundColor: 'var(--huel-light-gray)', padding: '1.5rem', border: '1px solid rgba(0,86,179,0.15)', borderLeft: '3px solid var(--huel-blue)' }}>
-                        <h3 className="mb-4" style={{ margin: 0, marginBottom: '1.25rem', color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', fontSize: '0.95rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                            2. Vending Deal Structure
-                        </h3>
-
-                        <div style={{ marginBottom: '1.25rem' }}>
-                            <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block' }}>Deal Type</label>
-                            <div style={{ display: 'flex', gap: 0 }}>
-                                <button
-                                    type="button"
-                                    style={{ ...toggleStyle(formData.dealType === 'standard'), borderRight: 'none' }}
-                                    onClick={() => setFormData(prev => ({ ...prev, dealType: 'standard' }))}
-                                >
-                                    Standard RTM
-                                </button>
-                                <button
-                                    type="button"
-                                    style={toggleStyle(formData.dealType === 'revenue_share')}
-                                    onClick={() => setFormData(prev => ({ ...prev, dealType: 'revenue_share' }))}
-                                >
-                                    Revenue Share
-                                </button>
-                            </div>
-                            <small style={{ display: 'block', marginTop: '6px', fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
-                                {formData.dealType === 'standard'
-                                    ? 'Huel earns revenue at the RTM unit price per case sold.'
-                                    : 'Partner operates the machine; Huel earns the greater of the minimum guarantee or a % of retail sales.'}
-                            </small>
-                        </div>
-
-                        {/* Number of machines + cost — always shown for vending */}
-                        <div className="grid grid-cols-2" style={{ gap: '1.25rem', marginBottom: '1.25rem' }}>
-                            <div>
-                                <label className="form-label">Number of Machines</label>
-                                <input
-                                    type="number"
-                                    name="numMachines"
-                                    value={formData.numMachines}
-                                    onChange={handleGeneralChange}
-                                    className="form-input"
-                                    min="0"
-                                    placeholder="e.g. 10"
-                                />
-                                <small style={{ display: 'block', marginTop: '4px', fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
-                                    Total machines placed at this account.
-                                </small>
-                            </div>
-                            <div>
-                                <label className="form-label">Machine Cost per Unit ($)</label>
-                                <input
-                                    type="number"
-                                    name="machineCostPerUnit"
-                                    value={formData.machineCostPerUnit}
-                                    onChange={handleGeneralChange}
-                                    className="form-input"
-                                    min="0"
-                                    placeholder="e.g. 2500"
-                                />
-                                <small style={{ display: 'block', marginTop: '4px', fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
-                                    Year 1 cost per machine (purchase or annual lease). Total capex = machines × cost.
-                                </small>
-                            </div>
-                        </div>
-
-                        {isRevenueShare && (
-                            <div className="grid grid-cols-2" style={{ gap: '1.25rem' }}>
-                                <div>
-                                    <label className="form-label">Monthly Minimum to Partner ($)</label>
-                                    <input
-                                        type="number"
-                                        name="revenueShareMin"
-                                        value={formData.revenueShareMin}
-                                        onChange={handleGeneralChange}
-                                        className="form-input"
-                                        min="0"
-                                        placeholder="e.g. 3000"
-                                    />
-                                    <small style={{ display: 'block', marginTop: '4px', fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
-                                        Huel pays this to the partner monthly regardless of sales. Annualised (×12) in ROI.
-                                    </small>
-                                </div>
-                                <div>
-                                    <label className="form-label">Partner Sales Split (%)</label>
-                                    <input
-                                        type="number"
-                                        name="revenueSharePct"
-                                        value={formData.revenueSharePct}
-                                        onChange={handleGeneralChange}
-                                        className="form-input"
-                                        min="0"
-                                        max="100"
-                                        step="0.1"
-                                        placeholder="e.g. 40"
-                                    />
-                                    <small style={{ display: 'block', marginTop: '4px', fontSize: '0.72rem', color: 'var(--huel-mid-gray)' }}>
-                                        Partner's share of retail sales. Huel pays the greater of this or the monthly minimum.
-                                    </small>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* ── 3. Product Forecasts ─────────────────────────────────────── */}
-                <div className="mb-6">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 style={{ margin: 0 }}>{isVending ? '3' : '2'}. Product Forecasts</h3>
-                        <button type="button" onClick={addProduct} className="btn btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
-                            + Add Product
-                        </button>
-                    </div>
-
-                    {formData.products.map((product, index) => (
-                        <div key={index} style={{ backgroundColor: 'var(--huel-light-gray)', padding: '1.5rem', marginBottom: '1.5rem', position: 'relative', border: '1px solid rgba(0,0,0,0.07)' }}>
-                            {formData.products.length > 1 && (
-                                <button
-                                    type="button"
-                                    onClick={() => removeProduct(index)}
-                                    style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontWeight: 'bold' }}
-                                >
-                                    Remove
-                                </button>
-                            )}
-
-                            <h4 className="mb-4" style={{ color: 'var(--huel-dark)', fontFamily: 'var(--font-heading)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.8rem' }}>Product Setup {index + 1}</h4>
-
-                            {/* Row 1: Product · RTM · Locations */}
-                            <div className="grid gap-4 mb-4" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                                <div>
-                                    <label className="form-label">RTD Product</label>
-                                    <select name="productName" value={product.productName} onChange={(e) => handleProductChange(index, e)} className="form-select">
-                                        {productList.map(p => (
-                                            <option key={p.name} value={p.name}>{p.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="form-label">Route to Market</label>
-                                    <select name="routeToMarket" value={product.routeToMarket || 'DSD'} onChange={(e) => handleProductChange(index, e)} className="form-select">
-                                        <option value="DSD">DSD</option>
-                                        <option value="Distributor">Distributor</option>
-                                        <option value="Direct to Retailer">Direct to Retailer</option>
-                                        <option value="Wholesale">Wholesale</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="form-label">{isVending ? 'Vending Locations' : 'Stores'}</label>
-                                    <input
-                                        type="number"
-                                        name="numStores"
-                                        value={product.numStores}
-                                        onChange={(e) => handleProductChange(index, e)}
-                                        className="form-input"
-                                        min="0"
-                                        required
-                                    />
-                                </div>
-                            </div>
-                            {/* Row 2: Velocity · SRP */}
-                            <div className="grid grid-cols-2 gap-4 mb-6">
-                                <div>
-                                    <label className="form-label">Base Velocity (Units/Location/Wk)</label>
-                                    <input
-                                        type="number"
-                                        name="baseVelocity"
-                                        value={product.baseVelocity}
-                                        onChange={(e) => handleProductChange(index, e)}
-                                        className="form-input"
-                                        step="0.1"
-                                        min="0"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="form-label">Retail SRP ($)</label>
-                                    <input
-                                        type="number"
-                                        name="srp"
-                                        value={product.srp}
-                                        onChange={(e) => handleProductChange(index, e)}
-                                        className="form-input"
-                                        step="0.01"
-                                        min="0"
-                                        placeholder="e.g. 4.99"
-                                    />
-                                </div>
-                            </div>
-
-                            <h4 className="mb-4" style={{ color: 'var(--huel-mid-gray)', fontSize: '0.75rem', fontFamily: 'var(--font-heading)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Trade Spend Profile — Annual</h4>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="form-label">Slotting Fixed Fee ($)</label>
-                                    <input
-                                        type="number"
-                                        name="slottingFixed"
-                                        value={product.slottingFixed}
-                                        onChange={(e) => handleProductChange(index, e)}
-                                        className="form-input"
-                                        min="0"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="form-label">Slotting Free Fill (Units)</label>
-                                    <input
-                                        type="number"
-                                        name="slottingFreeFillQty"
-                                        value={product.slottingFreeFillQty}
-                                        onChange={(e) => handleProductChange(index, e)}
-                                        className="form-input"
-                                        min="0"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="form-label">Total TPRs Spend ($)</label>
-                                    <input
-                                        type="number"
-                                        name="tprs"
-                                        value={product.tprs}
-                                        onChange={(e) => handleProductChange(index, e)}
-                                        className="form-input"
-                                        min="0"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="form-label">Total Marketing/Ads Spend ($)</label>
-                                    <input
-                                        type="number"
-                                        name="marketing"
-                                        value={product.marketing}
-                                        onChange={(e) => handleProductChange(index, e)}
-                                        className="form-input"
-                                        min="0"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* ── Live Weekly Units Preview ───────────────────────────── */}
-                {totalLiveWeekly > 0 && (
-                    <div style={{
-                        background: 'rgba(0,86,179,0.05)',
-                        border: '1px solid rgba(0,86,179,0.2)',
-                        borderLeft: '3px solid var(--huel-blue)',
-                        padding: '0.85rem 1.1rem',
-                        marginBottom: '1.5rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: '0.5rem',
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                            <span style={{
-                                fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase',
-                                letterSpacing: '0.06em', color: 'var(--huel-blue)',
-                            }}>
-                                Weekly Units
-                            </span>
-                            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--huel-dark)' }}>
-                                {totalLiveWeekly % 1 === 0 ? totalLiveWeekly : totalLiveWeekly.toFixed(1)}
-                            </span>
-                        </div>
-                        {liveWeeklyBreakdown.length > 1 && (
-                            <span style={{ fontSize: '0.75rem', color: 'var(--huel-mid-gray)' }}>
-                                {liveWeeklyBreakdown.map(p =>
-                                    `${p.units % 1 === 0 ? p.units : p.units.toFixed(1)} ${p.label}`
-                                ).join(' · ')}
-                            </span>
-                        )}
-                    </div>
-                )}
-
-                <div className="flex justify-between mt-8" style={{ borderTop: '1px solid var(--border-light)', paddingTop: '1.5rem' }}>
-                    <button type="button" onClick={onCancel} className="btn btn-secondary">
-                        Cancel
-                    </button>
-                    <button type="submit" className="btn btn-primary" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>
-                        Save Retailer Profile
-                    </button>
-                </div>
-            </form>
+  return (
+    <div className="form-layout">
+      <div className="form-layout__main glass-card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Deal builder</p>
+            <h1>{initialData ? 'Update retailer configuration' : 'Create retailer configuration'}</h1>
+            <p className="view-header__copy">
+              Capture workflow context and economics in one record so the dashboard can rank and track the deal properly.
+            </p>
+          </div>
         </div>
-    );
+
+        <form className="client-form" onSubmit={handleSubmit}>
+          <section className="glass-card section-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Account basics</p>
+                <h2>Who the deal is and where it sits</h2>
+              </div>
+            </div>
+
+            <div className="form-grid form-grid--two">
+              <label className="field-group">
+                <span className="form-label">Retailer / account</span>
+                <input
+                  className="form-input"
+                  type="text"
+                  name="retailerName"
+                  value={formData.retailerName}
+                  onChange={handleGeneralChange}
+                  placeholder="e.g. SFO Airport"
+                  required
+                />
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Account owner</span>
+                <input
+                  className="form-input"
+                  type="text"
+                  name="accountOwner"
+                  value={formData.accountOwner}
+                  onChange={handleGeneralChange}
+                  placeholder="Commercial owner"
+                />
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Pipeline status</span>
+                <select className="form-select" name="pipelineStatus" value={formData.pipelineStatus} onChange={handleGeneralChange}>
+                  {PIPELINE_STATUSES.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Client type</span>
+                <select className="form-select" name="clientType" value={formData.clientType} onChange={handleGeneralChange}>
+                  {CLIENT_TYPES.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Priority tier</span>
+                <select className="form-select" name="priorityTier" value={formData.priorityTier} onChange={handleGeneralChange}>
+                  {PRIORITY_TIERS.map((priority) => (
+                    <option key={priority} value={priority}>{priority}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Partner rebate (%)</span>
+                <input
+                  className="form-input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  name="rebate"
+                  value={formData.rebate}
+                  onChange={handleGeneralChange}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="glass-card section-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Workflow signals</p>
+                <h2>What makes the deal actionable</h2>
+              </div>
+              <ToneBadge label={health.label} tone={health.tone} />
+            </div>
+
+            <div className="form-grid form-grid--three">
+              <label className="field-group">
+                <span className="form-label">Win probability (%)</span>
+                <input
+                  className="form-input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  name="winProbability"
+                  value={formData.winProbability}
+                  onChange={handleGeneralChange}
+                />
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Forecast quarter</span>
+                <select className="form-select" name="forecastQuarter" value={formData.forecastQuarter} onChange={handleGeneralChange}>
+                  <option value="">Unassigned</option>
+                  {FORECAST_QUARTERS.map((quarter) => (
+                    <option key={quarter} value={quarter}>{quarter}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Target launch date</span>
+                <input
+                  className="form-input"
+                  type="date"
+                  name="targetLaunchDate"
+                  value={formData.targetLaunchDate}
+                  onChange={handleGeneralChange}
+                />
+              </label>
+            </div>
+
+            <div className="form-grid form-grid--two">
+              <label className="field-group">
+                <span className="form-label">Next action</span>
+                <input
+                  className="form-input"
+                  type="text"
+                  name="nextAction"
+                  value={formData.nextAction}
+                  onChange={handleGeneralChange}
+                  placeholder="e.g. pricing review with distributor"
+                />
+              </label>
+
+              <label className="field-group">
+                <span className="form-label">Next action due date</span>
+                <input
+                  className="form-input"
+                  type="date"
+                  name="nextActionDueDate"
+                  value={formData.nextActionDueDate}
+                  onChange={handleGeneralChange}
+                />
+              </label>
+            </div>
+
+            <label className="field-group">
+              <span className="form-label">Commercial notes</span>
+              <textarea
+                className="form-input form-input--textarea"
+                name="notes"
+                value={formData.notes}
+                onChange={handleGeneralChange}
+                placeholder="What matters commercially, operationally, or politically on this account?"
+                rows="4"
+              />
+            </label>
+
+            {completeness.missingCritical.length > 0 && formData.pipelineStatus !== 'Closed' && (
+              <div className="inline-warning">
+                Missing for pipeline quality: {completeness.missingCritical.join(', ')}
+              </div>
+            )}
+          </section>
+
+          {isVending && (
+            <section className="glass-card section-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Deal structure</p>
+                  <h2>Vending economics</h2>
+                </div>
+              </div>
+
+              <div className="toggle-row">
+                <button
+                  type="button"
+                  className={`toggle-button ${formData.dealType === 'standard' ? 'is-active' : ''}`}
+                  onClick={() => setFormData((currentFormData) => ({ ...currentFormData, dealType: 'standard' }))}
+                >
+                  Standard RTM
+                </button>
+                <button
+                  type="button"
+                  className={`toggle-button ${formData.dealType === 'revenue_share' ? 'is-active' : ''}`}
+                  onClick={() => setFormData((currentFormData) => ({ ...currentFormData, dealType: 'revenue_share' }))}
+                >
+                  Revenue Share
+                </button>
+              </div>
+
+              <div className="form-grid form-grid--two">
+                <label className="field-group">
+                  <span className="form-label">Number of machines</span>
+                  <input className="form-input" type="number" min="0" name="numMachines" value={formData.numMachines} onChange={handleGeneralChange} />
+                </label>
+
+                <label className="field-group">
+                  <span className="form-label">Machine cost per unit ($)</span>
+                  <input className="form-input" type="number" min="0" name="machineCostPerUnit" value={formData.machineCostPerUnit} onChange={handleGeneralChange} />
+                </label>
+              </div>
+
+              {isRevenueShare && (
+                <div className="form-grid form-grid--two">
+                  <label className="field-group">
+                    <span className="form-label">Monthly minimum to partner ($)</span>
+                    <input className="form-input" type="number" min="0" name="revenueShareMin" value={formData.revenueShareMin} onChange={handleGeneralChange} />
+                  </label>
+
+                  <label className="field-group">
+                    <span className="form-label">Partner sales split (%)</span>
+                    <input className="form-input" type="number" min="0" max="100" step="0.1" name="revenueSharePct" value={formData.revenueSharePct} onChange={handleGeneralChange} />
+                  </label>
+                </div>
+              )}
+            </section>
+          )}
+
+          <section className="glass-card section-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Product forecasts</p>
+                <h2>What drives the economics</h2>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={addProduct}>
+                + Add Product
+              </button>
+            </div>
+
+            <div className="product-stack">
+              {formData.products.map((product, index) => (
+                <div key={`${product.productName}-${index}`} className="product-card">
+                  <div className="product-card__header">
+                    <div>
+                      <p className="eyebrow">Product {index + 1}</p>
+                      <h3>{product.productName}</h3>
+                    </div>
+                    {formData.products.length > 1 && (
+                      <button type="button" className="btn btn-secondary btn-danger" onClick={() => removeProduct(index)}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="form-grid form-grid--three">
+                    <label className="field-group">
+                      <span className="form-label">RTD product</span>
+                      <select className="form-select" name="productName" value={product.productName} onChange={(event) => handleProductChange(index, event)}>
+                        {productList.map((option) => (
+                          <option key={option.name} value={option.name}>{option.name}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field-group">
+                      <span className="form-label">Route to market</span>
+                      <select className="form-select" name="routeToMarket" value={product.routeToMarket} onChange={(event) => handleProductChange(index, event)}>
+                        {Object.keys(PRICING_TIERS).map((routeToMarket) => (
+                          <option key={routeToMarket} value={routeToMarket}>{routeToMarket}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field-group">
+                      <span className="form-label">{isVending ? 'Locations' : 'Stores'}</span>
+                      <input className="form-input" type="number" min="0" name="numStores" value={product.numStores} onChange={(event) => handleProductChange(index, event)} required />
+                    </label>
+                  </div>
+
+                  <div className="form-grid form-grid--two">
+                    <label className="field-group">
+                      <span className="form-label">Base velocity (units/location/week)</span>
+                      <input className="form-input" type="number" min="0" step="0.1" name="baseVelocity" value={product.baseVelocity} onChange={(event) => handleProductChange(index, event)} required />
+                    </label>
+
+                    <label className="field-group">
+                      <span className="form-label">Retail SRP ($)</span>
+                      <input className="form-input" type="number" min="0" step="0.01" name="srp" value={product.srp} onChange={(event) => handleProductChange(index, event)} />
+                    </label>
+                  </div>
+
+                  <div className="form-grid form-grid--two">
+                    <label className="field-group">
+                      <span className="form-label">Slotting fixed fee ($)</span>
+                      <input className="form-input" type="number" min="0" name="slottingFixed" value={product.slottingFixed} onChange={(event) => handleProductChange(index, event)} />
+                    </label>
+
+                    <label className="field-group">
+                      <span className="form-label">Slotting free fill (units)</span>
+                      <input className="form-input" type="number" min="0" name="slottingFreeFillQty" value={product.slottingFreeFillQty} onChange={(event) => handleProductChange(index, event)} />
+                    </label>
+
+                    <label className="field-group">
+                      <span className="form-label">Total TPRs spend ($)</span>
+                      <input className="form-input" type="number" min="0" name="tprs" value={product.tprs} onChange={(event) => handleProductChange(index, event)} />
+                    </label>
+
+                    <label className="field-group">
+                      <span className="form-label">Total marketing spend ($)</span>
+                      <input className="form-input" type="number" min="0" name="marketing" value={product.marketing} onChange={(event) => handleProductChange(index, event)} />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className="form-actions">
+            <button type="button" className="btn btn-secondary" onClick={onCancel}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary">
+              Save retailer profile
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <aside className="form-layout__sidebar">
+        <article className="glass-card snapshot-card">
+          <p className="eyebrow">Deal snapshot</p>
+          <h2>{formData.retailerName || 'Unnamed account'}</h2>
+
+          <div className="split-metrics">
+            <div>
+              <span>Weekly units</span>
+              <strong>{formatNumber(weeklyUnits)}</strong>
+            </div>
+            <div>
+              <span>Health</span>
+              <strong>{health.label}</strong>
+            </div>
+            <div>
+              <span>Raw revenue</span>
+              <strong>{formatCompactCurrency(roi.huel.year1GrossRevenue)}</strong>
+            </div>
+            <div>
+              <span>Weighted revenue</span>
+              <strong>{formatCompactCurrency(weightedRevenue)}</strong>
+            </div>
+            <div>
+              <span>Raw EBITDA</span>
+              <strong className={roi.huel.year1Ebitda >= 0 ? 'text-success' : 'text-danger'}>
+                {formatCompactCurrency(roi.huel.year1Ebitda)}
+              </strong>
+            </div>
+            <div>
+              <span>Weighted EBITDA</span>
+              <strong className={weightedEbitda >= 0 ? 'text-success' : 'text-danger'}>
+                {formatCompactCurrency(weightedEbitda)}
+              </strong>
+            </div>
+          </div>
+
+          <div className="snapshot-card__footer">
+            <p>Trade rate: <strong>{formatPercent(roi.huel.tradeRatePercent)}</strong></p>
+            <p>Breakeven: <strong>{roi.huel.breakevenMonths > 0 ? `${roi.huel.breakevenMonths.toFixed(1)} months` : 'Immediate'}</strong></p>
+          </div>
+        </article>
+      </aside>
+    </div>
+  )
+}
+
+function ToneBadge({ label, tone }) {
+  return <span className={`tone-pill tone-pill--${tone}`}>{label}</span>
 }

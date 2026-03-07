@@ -39,7 +39,7 @@ export const syncClientToSheet = async (clientData) => {
     if (!url) return { success: false, error: 'No Sync URL provided' };
 
     try {
-        const response = await fetch(url, {
+        await fetch(url, {
             method: 'POST',
             mode: 'no-cors', // Opaque response, but forces the POST without strict CORS preflight issues sometimes
             headers: {
