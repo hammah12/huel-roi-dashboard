@@ -13,6 +13,89 @@ const PRIORITY_SORT_ORDER = {
   Low: 2,
 }
 
+export const SAVED_VIEW_PRESETS = [
+  {
+    id: 'all',
+    label: 'All accounts',
+    description: 'Full portfolio',
+    filters: {
+      search: '',
+      status: 'all',
+      clientType: 'all',
+      owner: 'all',
+      priority: 'all',
+      routeToMarket: 'all',
+      health: 'all',
+      attention: 'all',
+      launchWindow: 'all',
+    },
+  },
+  {
+    id: 'hot_pipeline',
+    label: 'Hot pipeline',
+    description: 'Highest-likelihood pipeline',
+    filters: {
+      search: '',
+      status: 'Hot Pipeline',
+      clientType: 'all',
+      owner: 'all',
+      priority: 'all',
+      routeToMarket: 'all',
+      health: 'all',
+      attention: 'all',
+      launchWindow: 'all',
+    },
+  },
+  {
+    id: 'needs_action',
+    label: 'Needs action',
+    description: 'Overdue or incomplete',
+    filters: {
+      search: '',
+      status: 'all',
+      clientType: 'all',
+      owner: 'all',
+      priority: 'all',
+      routeToMarket: 'all',
+      health: 'all',
+      attention: 'needs_action',
+      launchWindow: 'all',
+    },
+  },
+  {
+    id: 'launches_30',
+    label: 'Launches in 30d',
+    description: 'Upcoming launches',
+    filters: {
+      search: '',
+      status: 'all',
+      clientType: 'all',
+      owner: 'all',
+      priority: 'all',
+      routeToMarket: 'all',
+      health: 'all',
+      attention: 'all',
+      launchWindow: '30',
+    },
+  },
+  {
+    id: 'at_risk_live',
+    label: 'At-risk live',
+    description: 'Closed accounts needing attention',
+    filters: {
+      search: '',
+      status: 'Closed',
+      clientType: 'all',
+      owner: 'all',
+      priority: 'all',
+      routeToMarket: 'all',
+      health: 'At Risk',
+      attention: 'all',
+      launchWindow: 'all',
+    },
+  },
+]
+
 export function getClientLocations(client) {
   return Math.max(...getProductsList(client).map((product) => Number(product?.numStores) || 0), 0)
 }
@@ -191,6 +274,8 @@ export function filterClients(clients, filters) {
   return clients.filter((client) => {
     const health = getClientHealth(client).label
     const routeToMarket = getClientRouteToMarket(client)
+    const attention = getAttentionReason(client)
+    const launchOffset = daysFromToday(client.targetLaunchDate)
     const matchesSearch = !query || [
       client.retailerName,
       client.accountOwner,
@@ -207,6 +292,10 @@ export function filterClients(clients, filters) {
     const matchesPriority = filters.priority === 'all' || client.priorityTier === filters.priority
     const matchesRouteToMarket = filters.routeToMarket === 'all' || routeToMarket === filters.routeToMarket
     const matchesHealth = filters.health === 'all' || health === filters.health
+    const matchesAttention = filters.attention === 'all' || Boolean(attention)
+    const matchesLaunchWindow = filters.launchWindow === 'all' || (
+      launchOffset !== null && launchOffset >= 0 && launchOffset <= Number(filters.launchWindow)
+    )
 
     return (
       matchesSearch &&
@@ -215,7 +304,9 @@ export function filterClients(clients, filters) {
       matchesOwner &&
       matchesPriority &&
       matchesRouteToMarket &&
-      matchesHealth
+      matchesHealth &&
+      matchesAttention &&
+      matchesLaunchWindow
     )
   })
 }

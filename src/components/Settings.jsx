@@ -1,30 +1,26 @@
 import { useEffect, useState } from 'react'
 
-import {
-  fetchPricingData,
-  getConfig,
-  setConfig,
-  testConnection,
-} from '../utils/airtableSync'
+import { fetchBootstrap, fetchStatus, getWriteToken, saveProductCatalog, setWriteToken } from '../utils/apiClient'
 import { updateDynamicPricing } from '../utils/calculations'
-import { getDataStatus } from '../utils/dataStatus'
-import {
-  DEFAULT_PRODUCTS,
-  loadProducts,
-  mergeRemoteProducts,
-  saveProducts,
-} from '../utils/productCatalog'
+import { DEFAULT_PRODUCTS, toProductMap } from '../utils/productCatalog'
 
-const EMPTY_PRODUCT = { name: '', cogs: '', defaultSrp: '' }
+const EMPTY_PRODUCT = { name: '', cogs: 0, defaultSrp: 0 }
 
 const RETAILER_SCHEMA = [
   ['Name', 'Single line text', 'Primary field for the retailer or account name'],
   ['Client Type', 'Single select', 'Vending | Micromarket | Airport Concessions | Food Service'],
+  ['Pipeline Status', 'Single select', 'Closed | Hot Pipeline | High Interest | Prospect'],
   ['Route to Market', 'Single line text', 'Top-level summary only; per-product RTM lives in Products'],
   ['Account Owner', 'Single line text', 'Commercial owner responsible for the deal'],
   ['Priority Tier', 'Single select', 'High | Medium | Low'],
   ['Win Probability', 'Number', 'Store as a whole number from 0 to 100'],
   ['Forecast Quarter', 'Single select', 'Q1 | Q2 | Q3 | Q4'],
+  ['Rebate', 'Number', 'Retailer rebate percentage'],
+  ['Deal Type', 'Single select', 'standard | revenue_share'],
+  ['Num Machines', 'Number', 'Machine count for vending deals'],
+  ['Machine Cost Per Unit', 'Currency', 'Capex per machine'],
+  ['Revenue Share Pct', 'Number', 'Partner share percentage'],
+  ['Revenue Share Minimum Monthly', 'Currency', 'Monthly minimum partner payout'],
   ['Target Launch Date', 'Date', 'Planned launch date for pipeline tracking'],
   ['Next Action', 'Long text', 'Next commercial step'],
   ['Next Action Due Date', 'Date', 'Due date for the next action'],
@@ -53,24 +49,43 @@ const PRICING_SCHEMA = [
   ['Value', 'Number', 'Numeric value used by the pricing engine'],
 ]
 
-function formatTimestamp(value) {
-  if (!value) {
-    return 'Not yet'
-  }
+const PLACEMENTS_SCHEMA = [
+  ['Name', 'Single line text', 'Partner or retailer name'],
+  ['Type', 'Single select', 'Vending | Micromarket | Airport Concessions | Food Service'],
+  ['Q1', 'Number', 'Confirmed placements for Q1'],
+  ['Q2', 'Number', 'Confirmed placements for Q2'],
+  ['Q3', 'Number', 'Confirmed placements for Q3'],
+  ['Q4', 'Number', 'Confirmed placements for Q4'],
+]
 
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return 'Not yet'
-  }
+const SIGNALS_SCHEMA = [
+  ['Name', 'Single line text', 'Signal title or subject'],
+  ['Retailer', 'Link to another record', 'Optional linked retailer record for reliable drill-in'],
+  ['Account', 'Single line text', 'Related retailer or account name'],
+  ['Type', 'Single select', 'Commercial update | Buyer reply | Margin risk | Launch blocker | Inbound interest'],
+  ['Status', 'Single select', 'New | Reviewing | Accepted | Snoozed | Done'],
+  ['Priority', 'Single select', 'P0 | P1 | P2 | P3'],
+  ['Source', 'Single line text', 'Manual, Gmail, Slack, Airtable note, etc.'],
+  ['Due Date', 'Date', 'When the signal needs attention'],
+  ['Why It Matters', 'Long text', 'Commercial context'],
+  ['Owner', 'Single line text', 'Who should handle it'],
+  ['Created At', 'Date with time', 'App-generated timestamp'],
+  ['Updated At', 'Date with time', 'App-generated timestamp'],
+]
 
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
-}
+const TASKS_SCHEMA = [
+  ['Name', 'Single line text', 'Task title'],
+  ['Retailer', 'Link to another record', 'Optional linked retailer record for reliable drill-in'],
+  ['Account', 'Single line text', 'Related retailer or account name'],
+  ['Signal', 'Single line text', 'Optional linked signal label'],
+  ['Status', 'Single select', 'To Do | In Progress | Blocked | Done'],
+  ['Priority', 'Single select', 'High | Medium | Low'],
+  ['Owner', 'Single line text', 'Task owner'],
+  ['Due Date', 'Date', 'Execution due date'],
+  ['Notes', 'Long text', 'Operational context'],
+  ['Created At', 'Date with time', 'App-generated timestamp'],
+  ['Updated At', 'Date with time', 'App-generated timestamp'],
+]
 
 function StatusNotice({ notice }) {
   if (!notice) {
@@ -78,6 +93,10 @@ function StatusNotice({ notice }) {
   }
 
   return <div className={`status-notice status-notice--${notice.tone}`}>{notice.message}</div>
+}
+
+function TonePill({ label, tone = 'neutral' }) {
+  return <span className={`tone-pill tone-pill--${tone}`}>{label}</span>
 }
 
 function SchemaTable({ title, rows }) {
@@ -112,8 +131,22 @@ function SchemaTable({ title, rows }) {
 }
 
 function ProductCatalogue({ onProductsUpdated }) {
-  const [products, setProducts] = useState(() => loadProducts())
+  const [products, setProducts] = useState(DEFAULT_PRODUCTS)
   const [notice, setNotice] = useState(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    async function loadCatalog() {
+      try {
+        const data = await fetchBootstrap()
+        setProducts(data.products?.length ? data.products : DEFAULT_PRODUCTS)
+      } catch (error) {
+        setNotice({ tone: 'error', message: error.message })
+      }
+    }
+
+    loadCatalog()
+  }, [])
 
   const updateRow = (index, field, value) => {
     setProducts((currentProducts) => currentProducts.map((product, productIndex) => (
@@ -143,10 +176,22 @@ function ProductCatalogue({ onProductsUpdated }) {
       return
     }
 
-    saveProducts(cleanedProducts)
-    setProducts(cleanedProducts)
-    onProductsUpdated?.(cleanedProducts)
-    setNotice({ tone: 'success', message: 'Product catalogue saved. ROI calculations now use the updated defaults.' })
+    setIsSaving(true)
+
+    void saveProductCatalog(cleanedProducts)
+      .then((result) => {
+        const nextProducts = result.products?.length ? result.products : cleanedProducts
+        setProducts(nextProducts)
+        updateDynamicPricing({}, toProductMap(nextProducts))
+        onProductsUpdated?.(nextProducts)
+        setNotice({ tone: 'success', message: 'Shared Airtable product catalogue saved.' })
+      })
+      .catch((error) => {
+        setNotice({ tone: 'error', message: error.message })
+      })
+      .finally(() => {
+        setIsSaving(false)
+      })
   }
 
   return (
@@ -164,8 +209,8 @@ function ProductCatalogue({ onProductsUpdated }) {
           <button type="button" className="btn btn-secondary" onClick={addRow}>
             Add product
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleSave}>
-            Save catalogue
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? 'Saving...' : 'Save catalogue'}
           </button>
         </div>
       </div>
@@ -234,127 +279,61 @@ function ProductCatalogue({ onProductsUpdated }) {
 }
 
 export default function Settings({ onProductsUpdated }) {
-  const [token, setToken] = useState('')
-  const [baseId, setBaseId] = useState('')
+  const [status, setStatus] = useState(null)
   const [notice, setNotice] = useState(null)
   const [showGuide, setShowGuide] = useState(false)
-  const [isTesting, setIsTesting] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [dataStatus, setDataStatus] = useState(() => getDataStatus())
+  const [writeToken, setWriteTokenInput] = useState('')
 
   useEffect(() => {
-    const config = getConfig()
-    if (!config) {
-      return
-    }
-
-    setToken(config.token)
-    setBaseId(config.baseId)
+    setWriteTokenInput(getWriteToken())
+    void refreshStatus()
   }, [])
 
-  const refreshStatus = () => {
-    setDataStatus(getDataStatus())
-  }
-
-  const applyRemotePricing = (data) => {
-    if (!data) {
-      return
-    }
-
-    updateDynamicPricing(data.pricingTiers, data.products)
-
-    if (data.products && Object.keys(data.products).length > 0) {
-      const mergedProducts = mergeRemoteProducts(loadProducts(), data.products)
-      saveProducts(mergedProducts)
-      onProductsUpdated?.(mergedProducts)
-    }
-  }
-
-  const handleSaveAndTest = async (event) => {
-    event.preventDefault()
-
-    if (!token || !baseId) {
-      setConfig({ token: '', baseId: '' })
-      setNotice({
-        tone: 'warning',
-        message: 'Airtable credentials cleared. The dashboard will keep using the local catalogue until you reconnect.',
-      })
-      refreshStatus()
-      return
-    }
-
-    setIsTesting(true)
-    setNotice({ tone: 'info', message: 'Testing Airtable connection and refreshing pricing...' })
-
+  const refreshStatus = async () => {
     try {
-      setConfig({ token, baseId })
-
-      const result = await testConnection()
-      if (!result.success) {
-        setNotice({ tone: 'error', message: result.error })
-        refreshStatus()
-        return
-      }
-
-      const pricing = await fetchPricingData()
-      applyRemotePricing(pricing)
-      refreshStatus()
-      setNotice({
-        tone: 'success',
-        message: pricing
-          ? 'Airtable connected. Pricing has been refreshed and the catalogue was updated where remote SKU data exists.'
-          : 'Airtable connected, but no pricing rows were returned.',
-      })
+      const nextStatus = await fetchStatus()
+      setStatus(nextStatus)
     } catch (error) {
-      setNotice({ tone: 'error', message: error.message })
-      refreshStatus()
-    } finally {
-      setIsTesting(false)
+      setStatus({
+        connected: false,
+        projectMode: 'Airtable-first',
+        message: error.message,
+        env: {
+          AIRTABLE_TOKEN: false,
+          AIRTABLE_BASE_ID: false,
+        },
+      })
     }
   }
 
   const handleRefreshPricing = async () => {
-    if (!token || !baseId) {
-      setNotice({ tone: 'warning', message: 'Enter an Airtable token and base ID before refreshing pricing.' })
-      return
-    }
-
     setIsRefreshing(true)
-    setNotice({ tone: 'info', message: 'Refreshing pricing from Airtable...' })
+    setNotice({ tone: 'info', message: 'Refreshing shared Airtable settings...' })
 
     try {
-      setConfig({ token, baseId })
-      const pricing = await fetchPricingData()
-
-      if (!pricing) {
-        setNotice({ tone: 'error', message: 'Pricing refresh failed. Check the Airtable setup guide below.' })
-        refreshStatus()
-        return
-      }
-
-      applyRemotePricing(pricing)
-      refreshStatus()
-      setNotice({ tone: 'success', message: 'Pricing refreshed from Airtable.' })
+      const data = await fetchBootstrap()
+      const products = data.products?.length ? data.products : DEFAULT_PRODUCTS
+      updateDynamicPricing(data.pricingTiers || {}, toProductMap(products))
+      onProductsUpdated?.(products)
+      await refreshStatus()
+      setNotice({ tone: 'success', message: 'Airtable settings refreshed from the server.' })
     } catch (error) {
       setNotice({ tone: 'error', message: error.message })
-      refreshStatus()
     } finally {
       setIsRefreshing(false)
     }
   }
 
-  const handleClearConfig = () => {
-    setConfig({ token: '', baseId: '' })
-    setToken('')
-    setBaseId('')
+  const handleSaveWriteToken = () => {
+    setWriteToken(writeToken)
     setNotice({
-      tone: 'warning',
-      message: 'Saved Airtable credentials removed. Existing local data remains available.',
+      tone: 'success',
+      message: writeToken.trim()
+        ? 'Write token saved in this browser session.'
+        : 'Browser write token cleared.',
     })
-    refreshStatus()
   }
-
-  const isConfigured = Boolean(token && baseId)
 
   return (
     <div className="view-stack settings-layout">
@@ -363,8 +342,8 @@ export default function Settings({ onProductsUpdated }) {
           <p className="eyebrow">Operations setup</p>
           <h1>Settings</h1>
           <p className="view-header__copy">
-            Airtable is the only sync target in this build. Pricing can refresh from Airtable, and retailer sync writes the
-            expanded workflow fields required by the commercial dashboard.
+            Airtable is now the source of truth for production data. The browser no longer stores Airtable credentials or owns the
+            canonical portfolio state.
           </p>
         </div>
       </header>
@@ -374,56 +353,24 @@ export default function Settings({ onProductsUpdated }) {
           <div className="section-heading">
             <div>
               <p className="eyebrow">Airtable sync</p>
-              <h2>Connection and pricing refresh</h2>
+              <h2>Server-side connection and pricing refresh</h2>
               <p className="view-header__copy">
-                Save credentials once, then use Airtable as the source of truth for dynamic RTM pricing and synced retailer records.
+                Vercel API routes read Airtable credentials from environment variables and expose shared data to the app.
               </p>
             </div>
 
-            <span className={`tone-pill tone-pill--${isConfigured ? 'success' : 'neutral'}`}>
-              {isConfigured ? 'Configured' : 'Not configured'}
+            <span className={`tone-pill tone-pill--${status?.connected ? 'success' : 'danger'}`}>
+              {status?.connected ? 'Connected' : 'Needs attention'}
             </span>
           </div>
 
-          <form className="client-form" onSubmit={handleSaveAndTest}>
-            <div className="form-grid form-grid--two">
-              <label className="field-group">
-                <span className="form-label">Personal access token</span>
-                <input
-                  className="form-input"
-                  type="password"
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                  placeholder="pat..."
-                />
-              </label>
+          <StatusNotice notice={notice || (status ? { tone: status.connected ? 'success' : 'error', message: status.message } : null)} />
 
-              <label className="field-group">
-                <span className="form-label">Base ID</span>
-                <input
-                  className="form-input"
-                  type="text"
-                  value={baseId}
-                  onChange={(event) => setBaseId(event.target.value)}
-                  placeholder="app..."
-                />
-              </label>
-            </div>
-
-            <StatusNotice notice={notice} />
-
-            <div className="settings-actions">
-              <button type="submit" className="btn btn-primary" disabled={isTesting}>
-                {isTesting ? 'Testing...' : 'Save and test'}
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={handleRefreshPricing} disabled={isRefreshing}>
-                {isRefreshing ? 'Refreshing...' : 'Refresh pricing'}
-              </button>
-              <button type="button" className="btn btn-secondary btn-danger" onClick={handleClearConfig}>
-                Clear credentials
-              </button>
-            </div>
-          </form>
+          <div className="settings-actions">
+            <button type="button" className="btn btn-primary" onClick={handleRefreshPricing} disabled={isRefreshing}>
+              {isRefreshing ? 'Refreshing...' : 'Refresh shared settings'}
+            </button>
+          </div>
         </article>
 
         <article className="glass-card settings-panel status-panel">
@@ -436,30 +383,133 @@ export default function Settings({ onProductsUpdated }) {
 
           <div className="status-panel__grid">
             <div className="status-panel__item">
-              <span>Pricing source</span>
-              <strong>{dataStatus.pricing.source || 'Local catalogue'}</strong>
+              <span>Project mode</span>
+              <strong>{status?.projectMode || 'Airtable-first'}</strong>
             </div>
             <div className="status-panel__item">
-              <span>Last pricing refresh</span>
-              <strong>{formatTimestamp(dataStatus.pricing.lastSuccessAt)}</strong>
+              <span>Airtable token</span>
+              <strong>{status?.env?.AIRTABLE_TOKEN ? 'Present' : 'Missing'}</strong>
             </div>
             <div className="status-panel__item">
-              <span>Last pricing error</span>
-              <strong>{dataStatus.pricing.lastError || 'None recorded'}</strong>
+              <span>Airtable base ID</span>
+              <strong>{status?.env?.AIRTABLE_BASE_ID ? 'Present' : 'Missing'}</strong>
             </div>
             <div className="status-panel__item">
-              <span>Last client sync target</span>
-              <strong>{dataStatus.clientSync.target || 'Not yet synced'}</strong>
+              <span>Connection message</span>
+              <strong>{status?.message || 'Checking connection...'}</strong>
             </div>
             <div className="status-panel__item">
-              <span>Last client sync</span>
-              <strong>{formatTimestamp(dataStatus.clientSync.lastSuccessAt)}</strong>
+              <span>Write protection</span>
+              <strong>{status?.writeProtectionEnabled ? 'Enabled' : 'Off'}</strong>
             </div>
             <div className="status-panel__item">
-              <span>Last sync error</span>
-              <strong>{dataStatus.clientSync.lastError || 'None recorded'}</strong>
+              <span>Schema audit</span>
+              <strong>
+                {status?.schemaAudit?.healthy
+                  ? 'Healthy'
+                  : status?.schemaAudit
+                    ? 'Needs cleanup'
+                    : 'Unavailable'}
+              </strong>
             </div>
           </div>
+        </article>
+      </section>
+
+      <section className="settings-grid">
+        <article className="glass-card settings-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Write access</p>
+              <h2>Optional app-level protection</h2>
+              <p className="view-header__copy">
+                If `APP_WRITE_TOKEN` is configured on Vercel, enter it here so this browser session can create and edit records.
+              </p>
+            </div>
+            <span className={`tone-pill tone-pill--${status?.writeProtectionEnabled ? 'warning' : 'neutral'}`}>
+              {status?.writeProtectionEnabled ? 'Protected' : 'Open'}
+            </span>
+          </div>
+
+          <div className="form-grid form-grid--two">
+            <label className="field-group">
+              <span className="form-label">Browser write token</span>
+              <input
+                className="form-input"
+                type="password"
+                value={writeToken}
+                onChange={(event) => setWriteTokenInput(event.target.value)}
+                placeholder={status?.writeProtectionEnabled ? 'Enter shared write token' : 'Not required unless protection is enabled'}
+              />
+            </label>
+          </div>
+
+          <div className="settings-actions">
+            <button type="button" className="btn btn-primary" onClick={handleSaveWriteToken}>
+              Save browser token
+            </button>
+          </div>
+        </article>
+
+        <article className="glass-card settings-panel status-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Schema audit</p>
+              <h2>How close the Airtable base is to the recommended model</h2>
+            </div>
+          </div>
+
+          {status?.schemaAudit ? (
+            <>
+              <div className="status-panel__grid">
+                <div className="status-panel__item">
+                  <span>Missing tables</span>
+                  <strong>{status.schemaAudit.totals.missingTables}</strong>
+                </div>
+                <div className="status-panel__item">
+                  <span>Missing fields</span>
+                  <strong>{status.schemaAudit.totals.missingFields}</strong>
+                </div>
+                <div className="status-panel__item">
+                  <span>Type mismatches</span>
+                  <strong>{status.schemaAudit.totals.typeWarnings}</strong>
+                </div>
+              </div>
+
+              <div className="schema-audit-list">
+                {Object.entries(status.schemaAudit.tables).map(([tableName, audit]) => (
+                  <div key={tableName} className="schema-audit-card">
+                    <div className="schema-audit-card__header">
+                      <strong>{tableName}</strong>
+                      <span className={`tone-pill tone-pill--${audit.missingFields.length || audit.typeWarnings.length || !audit.exists ? 'warning' : 'success'}`}>
+                        {audit.exists ? 'Present' : 'Missing'}
+                      </span>
+                    </div>
+                    {!audit.exists && <p className="empty-copy">This table is missing from the Airtable base.</p>}
+                    {audit.missingFields.length > 0 && (
+                      <p className="detail-card__notes">Missing fields: {audit.missingFields.join(', ')}</p>
+                    )}
+                    {audit.typeWarnings.length > 0 && (
+                      <div className="detail-chip-list">
+                        {audit.typeWarnings.map((warning) => (
+                          <TonePill
+                            key={`${tableName}-${warning.field}`}
+                            label={`${warning.field}: ${warning.currentType}`}
+                            tone="warning"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {audit.exists && audit.missingFields.length === 0 && audit.typeWarnings.length === 0 && (
+                      <p className="empty-copy">This table matches the app&apos;s expected shape.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="empty-copy">Schema audit is unavailable until the Airtable connection succeeds.</p>
+          )}
         </article>
       </section>
 
@@ -479,6 +529,9 @@ export default function Settings({ onProductsUpdated }) {
             <SchemaTable title="Retailers table" rows={RETAILER_SCHEMA} />
             <SchemaTable title="Products table" rows={PRODUCT_SCHEMA} />
             <SchemaTable title="Pricing Config table" rows={PRICING_SCHEMA} />
+            <SchemaTable title="Placements Forecast table" rows={PLACEMENTS_SCHEMA} />
+            <SchemaTable title="Signals table" rows={SIGNALS_SCHEMA} />
+            <SchemaTable title="Tasks table" rows={TASKS_SCHEMA} />
           </div>
         )}
       </section>

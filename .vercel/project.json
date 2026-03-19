@@ -1,1 +1,16 @@
-{"projectId":"prj_2r6ds0zqeF9NgZ1UdV3rBt4rXWwn","orgId":"team_U7XVHbHRb9nyBrmuHxuH43oK","projectName":"rtd_roi_dashboard"}
+{
+  "projectId": "prj_Y7HGxvOQlNnhaauDEJyCzXoBLs40",
+  "orgId": "team_U7XVHbHRb9nyBrmuHxuH43oK",
+  "projectName": "huel-roi-dashboard",
+  "settings": {
+    "createdAt": 1772811892902,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

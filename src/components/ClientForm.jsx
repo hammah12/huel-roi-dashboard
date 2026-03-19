@@ -7,6 +7,7 @@ import {
   PIPELINE_STATUSES,
   PRIORITY_TIERS,
   createEmptyClient,
+  createEmptyContact,
   createEmptyProduct,
   defaultWinProbability,
   normalizeClient,
@@ -83,6 +84,30 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
         products: nextProducts.length ? nextProducts : [createEmptyProduct(productList)],
       }
     })
+  }
+
+  const addContact = () => {
+    setFormData((currentFormData) => ({
+      ...currentFormData,
+      contacts: [...(currentFormData.contacts || []), createEmptyContact()],
+    }))
+  }
+
+  const removeContact = (contactIndex) => {
+    setFormData((currentFormData) => ({
+      ...currentFormData,
+      contacts: (currentFormData.contacts || []).filter((_, index) => index !== contactIndex),
+    }))
+  }
+
+  const handleContactChange = (contactIndex, event) => {
+    const { name, value } = event.target
+    setFormData((currentFormData) => ({
+      ...currentFormData,
+      contacts: (currentFormData.contacts || []).map((contact, index) => (
+        index === contactIndex ? { ...contact, [name]: value } : contact
+      )),
+    }))
   }
 
   const handleSubmit = (event) => {
@@ -421,6 +446,85 @@ export default function ClientForm({ onSave, onCancel, initialData, availablePro
                 </div>
               ))}
             </div>
+          </section>
+
+          <section className="glass-card section-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Account contacts</p>
+                <h2>Key people on this deal</h2>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={addContact}>
+                + Add Contact
+              </button>
+            </div>
+
+            {(formData.contacts || []).length === 0 ? (
+              <p className="empty-copy">No contacts added yet. Add the buyer, distributor rep, or other key contacts.</p>
+            ) : (
+              <div className="product-stack">
+                {(formData.contacts || []).map((contact, contactIndex) => (
+                  <div key={contact.id || contactIndex} className="product-card">
+                    <div className="product-card__header">
+                      <div>
+                        <p className="eyebrow">Contact {contactIndex + 1}</p>
+                        <h3>{contact.name || 'New contact'}</h3>
+                      </div>
+                      <button type="button" className="btn btn-secondary btn-danger" onClick={() => removeContact(contactIndex)}>
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="form-grid form-grid--two">
+                      <label className="field-group">
+                        <span className="form-label">Name</span>
+                        <input
+                          className="form-input"
+                          type="text"
+                          name="name"
+                          value={contact.name}
+                          onChange={(event) => handleContactChange(contactIndex, event)}
+                          placeholder="e.g. Sarah Johnson"
+                        />
+                      </label>
+                      <label className="field-group">
+                        <span className="form-label">Title / Role</span>
+                        <input
+                          className="form-input"
+                          type="text"
+                          name="title"
+                          value={contact.title}
+                          onChange={(event) => handleContactChange(contactIndex, event)}
+                          placeholder="e.g. Category Buyer"
+                        />
+                      </label>
+                      <label className="field-group">
+                        <span className="form-label">Phone</span>
+                        <input
+                          className="form-input"
+                          type="tel"
+                          name="phone"
+                          value={contact.phone}
+                          onChange={(event) => handleContactChange(contactIndex, event)}
+                          placeholder="e.g. (555) 123-4567"
+                        />
+                      </label>
+                      <label className="field-group">
+                        <span className="form-label">Email</span>
+                        <input
+                          className="form-input"
+                          type="email"
+                          name="email"
+                          value={contact.email}
+                          onChange={(event) => handleContactChange(contactIndex, event)}
+                          placeholder="e.g. sarah@retailer.com"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <div className="form-actions">

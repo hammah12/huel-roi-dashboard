@@ -32,7 +32,62 @@ function SummaryCard({ label, value, sublabel, tone = 'neutral' }) {
   )
 }
 
-function RetailerCard({ record, onEdit, onDuplicate, onRemove }) {
+function BulkActionToolbar({ selectedCount, onApply, onClear }) {
+  const applyOwner = () => {
+    const nextOwner = window.prompt('Set account owner for selected accounts:')
+    if (nextOwner === null) {
+      return
+    }
+
+    onApply({ accountOwner: nextOwner.trim() })
+  }
+
+  const applyPriority = () => {
+    const nextPriority = window.prompt('Set priority for selected accounts (High, Medium, Low):')
+    if (nextPriority === null) {
+      return
+    }
+
+    onApply({ priorityTier: nextPriority.trim() })
+  }
+
+  const applyStatus = () => {
+    const nextStatus = window.prompt('Set pipeline status for selected accounts (Closed, Hot Pipeline, High Interest, Prospect):')
+    if (nextStatus === null) {
+      return
+    }
+
+    onApply({ pipelineStatus: nextStatus.trim() })
+  }
+
+  const applyQuarter = () => {
+    const nextQuarter = window.prompt('Set forecast quarter for selected accounts (Q1, Q2, Q3, Q4, or leave blank):', '')
+    if (nextQuarter === null) {
+      return
+    }
+
+    onApply({ forecastQuarter: nextQuarter.trim().toUpperCase() })
+  }
+
+  return (
+    <section className="bulk-action-toolbar glass-card">
+      <div>
+        <p className="eyebrow">Bulk actions</p>
+        <h2>{selectedCount} selected accounts</h2>
+      </div>
+
+      <div className="bulk-action-toolbar__actions">
+        <button type="button" className="btn btn-secondary" onClick={applyOwner}>Update owner</button>
+        <button type="button" className="btn btn-secondary" onClick={applyPriority}>Update priority</button>
+        <button type="button" className="btn btn-secondary" onClick={applyStatus}>Update status</button>
+        <button type="button" className="btn btn-secondary" onClick={applyQuarter}>Update quarter</button>
+        <button type="button" className="btn btn-secondary" onClick={onClear}>Clear selection</button>
+      </div>
+    </section>
+  )
+}
+
+function RetailerCard({ record, onEdit, onDuplicate, onRemove, onOpenDetail, isSelected, onToggleSelect }) {
   const { client, index } = record
   const roi = calculateROI(client)
   const health = getClientHealth(client)
@@ -44,6 +99,10 @@ function RetailerCard({ record, onEdit, onDuplicate, onRemove }) {
       <div className="retailer-card__header">
         <div>
           <div className="retailer-card__chips">
+            <label className="selection-chip">
+              <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(client.id)} />
+              <span>Select</span>
+            </label>
             <TonePill label={health.label} tone={health.tone} />
             <TonePill label={client.priorityTier} tone={client.priorityTier === 'High' ? 'danger' : 'neutral'} />
             {client.accountOwner && <TonePill label={client.accountOwner} tone="info" />}
@@ -54,6 +113,7 @@ function RetailerCard({ record, onEdit, onDuplicate, onRemove }) {
         </div>
 
         <div className="retailer-card__actions">
+          <button type="button" className="btn btn-secondary" onClick={() => onOpenDetail(index)}>Open</button>
           <button type="button" className="btn btn-secondary" onClick={() => onEdit(index)}>Edit</button>
           <button type="button" className="btn btn-secondary" onClick={() => onDuplicate(index)}>Copy</button>
           <button type="button" className="btn btn-secondary btn-danger" onClick={() => onRemove(index)}>Delete</button>
@@ -104,13 +164,19 @@ export default function DashboardOverview({
   totalCount,
   hasActiveFilters,
   onEdit,
+  onOpenDetail,
   onDuplicate,
   onRemove,
+  onBulkUpdate,
+  selectedClientIds,
+  onToggleClientSelection,
+  onClearSelection,
 }) {
   const clients = clientRecords.map((record) => record.client)
   const liveRecords = clientRecords.filter((record) => record.client.pipelineStatus === 'Closed')
   const liveClients = liveRecords.map((record) => record.client)
   const pipelineClients = clients.filter((client) => client.pipelineStatus !== 'Closed')
+  const selectedCount = clientRecords.filter(({ client }) => selectedClientIds.includes(client.id)).length
 
   const liveRevenue = liveClients.reduce((sum, client) => sum + calculateROI(client).huel.year1GrossRevenue, 0)
   const liveEbitda = liveClients.reduce((sum, client) => sum + calculateROI(client).huel.year1Ebitda, 0)
@@ -200,6 +266,14 @@ export default function DashboardOverview({
         ))}
       </section>
 
+      {selectedCount > 0 && (
+        <BulkActionToolbar
+          selectedCount={selectedCount}
+          onApply={onBulkUpdate}
+          onClear={onClearSelection}
+        />
+      )}
+
       <section className="dashboard-columns">
         <article className="glass-card">
           <div className="section-heading">
@@ -229,7 +303,7 @@ export default function DashboardOverview({
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => onEdit(clientRecords.find((record) => record.client === client)?.index)}
+                    onClick={() => onOpenDetail(clientRecords.find((record) => record.client === client)?.index)}
                   >
                     Open
                   </button>
@@ -255,6 +329,7 @@ export default function DashboardOverview({
               <table className="dashboard-table">
                 <thead>
                   <tr>
+                    <th />
                     <th>Deal</th>
                     <th>Owner</th>
                     <th>Priority</th>
@@ -262,11 +337,22 @@ export default function DashboardOverview({
                     <th>Weighted EBITDA</th>
                     <th>Launch</th>
                     <th>Forecast</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {opportunityRanking.map(({ client, weightedEbitda, health, completeness }) => (
+                  {opportunityRanking.map(({ client, weightedEbitda, health, completeness }) => {
+                    const matchingRecord = clientRecords.find((record) => record.client === client)
+                    return (
                     <tr key={client.retailerName}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selectedClientIds.includes(client.id)}
+                          onChange={() => onToggleClientSelection(client.id)}
+                          aria-label={`Select ${client.retailerName}`}
+                        />
+                      </td>
                       <td>
                         <strong>{client.retailerName}</strong>
                         <small>{health.label}{completeness.missingCritical.length ? ` · Missing ${completeness.missingCritical.length}` : ''}</small>
@@ -279,8 +365,14 @@ export default function DashboardOverview({
                       </td>
                       <td>{client.targetLaunchDate ? formatShortDate(client.targetLaunchDate) : 'Unscheduled'}</td>
                       <td>{client.forecastQuarter || 'Unassigned'}</td>
+                      <td>
+                        <button type="button" className="btn btn-secondary" onClick={() => onOpenDetail(matchingRecord?.index)}>
+                          Open
+                        </button>
+                      </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -363,8 +455,11 @@ export default function DashboardOverview({
                 key={`${record.index}-${record.client.retailerName}`}
                 record={record}
                 onEdit={onEdit}
+                onOpenDetail={onOpenDetail}
                 onDuplicate={onDuplicate}
                 onRemove={onRemove}
+                isSelected={selectedClientIds.includes(record.client.id)}
+                onToggleSelect={onToggleClientSelection}
               />
             ))}
           </div>

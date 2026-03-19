@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -12,9 +12,7 @@ import {
 import { calculateROI } from '../utils/calculations'
 import {
   createEmptyForecastRow,
-  loadForecastRows,
   QUARTERS,
-  saveForecastRows,
 } from '../utils/forecastStore'
 import {
   formatCompactCurrency,
@@ -30,6 +28,7 @@ import {
   getDataCompleteness,
   getWinProbabilityRatio,
 } from '../utils/portfolio'
+import { fetchBootstrap, savePlacements } from '../utils/apiClient'
 
 const DEFAULT_FILTERS = {
   search: '',
@@ -158,25 +157,45 @@ export default function PlacementsForecast({
   onEdit,
   onUpdateClient,
 }) {
-  const [manualRows, setManualRows] = useState(() => loadForecastRows())
+  const [manualRows, setManualRows] = useState([])
   const [isEditingPlanner, setIsEditingPlanner] = useState(false)
+  const [plannerError, setPlannerError] = useState('')
 
-  const persistRows = (nextRows) => {
-    setManualRows(saveForecastRows(nextRows))
+  useEffect(() => {
+    async function loadPlacements() {
+      try {
+        const data = await fetchBootstrap()
+        setManualRows(data.placements || [])
+      } catch (error) {
+        setPlannerError(error.message)
+      }
+    }
+
+    loadPlacements()
+  }, [])
+
+  const persistRows = async (nextRows) => {
+    try {
+      setPlannerError('')
+      const result = await savePlacements(nextRows)
+      setManualRows(result.rows || [])
+    } catch (error) {
+      setPlannerError(error.message)
+    }
   }
 
   const addManualRow = () => {
-    persistRows([...manualRows, createEmptyForecastRow()])
+    void persistRows([...manualRows, createEmptyForecastRow()])
   }
 
   const updateManualRow = (id, field, value) => {
-    persistRows(manualRows.map((row) => (
+    void persistRows(manualRows.map((row) => (
       row.id === id ? { ...row, [field]: QUARTERS.includes(field) ? Number(value) || 0 : value } : row
     )))
   }
 
   const removeManualRow = (id) => {
-    persistRows(manualRows.filter((row) => row.id !== id))
+    void persistRows(manualRows.filter((row) => row.id !== id))
   }
 
   const clients = clientRecords.map((record) => record.client)
@@ -398,6 +417,12 @@ export default function PlacementsForecast({
             <TonePill label={`${activeManualRows.length} rows`} tone={activeManualRows.length ? 'info' : 'neutral'} />
           </div>
 
+          {plannerError && (
+            <div className="inline-warning">
+              Unable to sync placements planner: {plannerError}
+            </div>
+          )}
+
           {activeManualRows.length === 0 ? (
             <p className="empty-copy">No confirmed planner rows match the current filter set.</p>
           ) : (
@@ -534,6 +559,9 @@ export default function PlacementsForecast({
             </div>
 
             <div className="planner-toolbar">
+              {plannerError && (
+                <span className="table-note">Planner sync error: {plannerError}</span>
+              )}
               {isEditingPlanner && (
                 <button type="button" className="btn btn-secondary" onClick={addManualRow}>
                   Add row

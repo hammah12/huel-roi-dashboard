@@ -4,6 +4,7 @@ export const CLIENT_TYPES = ['Vending', 'Micromarket', 'Airport Concessions', 'F
 export const PIPELINE_STATUSES = ['Closed', 'Hot Pipeline', 'High Interest', 'Prospect']
 export const PRIORITY_TIERS = ['High', 'Medium', 'Low']
 export const FORECAST_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
+export const ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'Note', 'Sample sent', 'Pricing sent', 'Contract', 'Other']
 
 const WIN_PROBABILITY_DEFAULTS = {
   Closed: 100,
@@ -35,6 +36,7 @@ export function defaultWinProbability(status) {
 
 export function createEmptyProduct(availableProducts = []) {
   return {
+    id: '',
     productName: availableProducts[0]?.name || 'Huel BE RTD',
     routeToMarket: 'DSD',
     numStores: '',
@@ -49,6 +51,7 @@ export function createEmptyProduct(availableProducts = []) {
 
 function normalizeProduct(product = {}, legacyRouteToMarket = 'DSD', availableProducts = []) {
   return {
+    id: product.id || '',
     productName: product.productName || availableProducts[0]?.name || 'Huel BE RTD',
     routeToMarket: product.routeToMarket || legacyRouteToMarket || 'DSD',
     numStores: stringifyValue(product.numStores),
@@ -71,6 +74,7 @@ export function normalizeClient(client = {}, availableProducts = [], now = new D
   const hasManualProbability = client.winProbability !== undefined && client.winProbability !== null && client.winProbability !== ''
 
   return {
+    id: client.id || '',
     retailerName: client.retailerName || '',
     clientType: client.clientType || 'Vending',
     pipelineStatus: client.pipelineStatus || 'Prospect',
@@ -93,6 +97,8 @@ export function normalizeClient(client = {}, availableProducts = [], now = new D
     createdAt,
     updatedAt: client.updatedAt || createdAt,
     products,
+    activities: Array.isArray(client.activities) ? client.activities : [],
+    contacts: Array.isArray(client.contacts) ? client.contacts : [],
   }
 }
 
@@ -133,5 +139,26 @@ export function createEmptyClient(availableProducts = []) {
     priorityTier: 'Medium',
     winProbability: defaultWinProbability('Prospect'),
     products: [createEmptyProduct(availableProducts)],
+    activities: [],
+    contacts: [],
   }, availableProducts)
+}
+
+export function createEmptyContact() {
+  return {
+    id: `contact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name: '',
+    title: '',
+    phone: '',
+    email: '',
+  }
+}
+
+export function createEmptyActivity(type = 'Note') {
+  return {
+    id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    type,
+    note: '',
+    timestamp: new Date().toISOString(),
+  }
 }

@@ -7,6 +7,9 @@ export default function PortfolioFilters({
   filteredCount,
   totalCount,
   options,
+  savedViews = [],
+  activeSavedView = 'all',
+  onApplySavedView,
   onChange,
   onClear,
 }) {
@@ -27,6 +30,22 @@ export default function PortfolioFilters({
           </button>
         </div>
       </div>
+
+      {savedViews.length > 0 && (
+        <div className="saved-views-row">
+          {savedViews.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              className={`saved-view-chip ${activeSavedView === view.id ? 'is-active' : ''}`}
+              onClick={() => onApplySavedView?.(view.id)}
+            >
+              <strong>{view.label}</strong>
+              <small>{view.description}</small>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="filters-grid">
         <label className="filter-field filter-field--search">

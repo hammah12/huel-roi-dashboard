@@ -1,23 +1,29 @@
 import { useEffect, useState } from 'react'
+import AccountDetailPanel from './components/AccountDetailPanel'
+import CommandCenter from './components/CommandCenter'
 import DashboardOverview from './components/DashboardOverview'
 import ClientForm from './components/ClientForm'
+import MorningBriefing from './components/MorningBriefing'
 import PlacementsForecast from './components/PlacementsForecast'
 import PortfolioFilters from './components/PortfolioFilters'
 import Settings from './components/Settings'
+import { createEmptyClient, normalizeClient } from './utils/clientStore'
+import { filterClients, getFilterOptions, SAVED_VIEW_PRESETS } from './utils/portfolio'
 import {
-  fetchPricingData as fetchAirtablePricing,
-  getConfig as getAirtableConfig,
-  syncClientToAirtable,
-} from './utils/airtableSync'
-import { createEmptyClient, loadClients, saveClients } from './utils/clientStore'
-import { markPricingFetchFailure } from './utils/dataStatus'
-import { filterClients, getFilterOptions } from './utils/portfolio'
-import {
-  loadProducts,
-  mergeRemoteProducts,
+  DEFAULT_PRODUCTS,
   toProductMap,
 } from './utils/productCatalog'
 import { updateDynamicPricing } from './utils/calculations'
+import {
+  createClient as createRemoteClient,
+  createSignal as createRemoteSignal,
+  createTask as createRemoteTask,
+  deleteClient as deleteRemoteClient,
+  fetchBootstrap,
+  updateSignal as updateRemoteSignal,
+  updateTask as updateRemoteTask,
+  updateClient as updateRemoteClient,
+} from './utils/apiClient'
 
 const DEFAULT_FILTERS = {
   search: '',
@@ -27,123 +33,153 @@ const DEFAULT_FILTERS = {
   priority: 'all',
   routeToMarket: 'all',
   health: 'all',
+  attention: 'all',
+  launchWindow: 'all',
 }
 
 function App() {
-  const [availableProducts, setAvailableProducts] = useState(() => {
-    const products = loadProducts()
-    updateDynamicPricing({}, toProductMap(products))
-    return products
-  })
-  const [clients, setClients] = useState(() => loadClients(loadProducts()))
+  const [availableProducts, setAvailableProducts] = useState(DEFAULT_PRODUCTS)
+  const [clients, setClients] = useState([])
+  const [signals, setSignals] = useState([])
+  const [tasks, setTasks] = useState([])
   const [view, setView] = useState('dashboard')
   const [editingClientIndex, setEditingClientIndex] = useState(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
+  const [activeSavedView, setActiveSavedView] = useState('all')
+  const [selectedClientIds, setSelectedClientIds] = useState([])
+  const [detailClientId, setDetailClientId] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    async function loadPricing() {
-      if (!getAirtableConfig()) {
-        return
-      }
-
+    async function loadData() {
+      setIsLoading(true)
+      setLoadError('')
       try {
-        const data = await fetchAirtablePricing()
-        if (!data) {
-          return
-        }
-
-        updateDynamicPricing(data.pricingTiers, data.products)
-        if (data.products) {
-          setAvailableProducts((currentProducts) => mergeRemoteProducts(currentProducts, data.products))
-        }
+        const data = await fetchBootstrap()
+        const products = data.products?.length ? data.products : DEFAULT_PRODUCTS
+        updateDynamicPricing(data.pricingTiers || {}, toProductMap(products))
+        setAvailableProducts(products)
+        const nextClients = (data.clients || []).map((client) => normalizeClient(client, products))
+        setClients(nextClients)
+        setSignals(data.signals || [])
+        setTasks(data.tasks || [])
+        setSelectedClientIds((currentIds) => currentIds.filter((clientId) => nextClients.some((client) => client.id === clientId)))
+        setDetailClientId((currentId) => (nextClients.some((client) => client.id === currentId) ? currentId : ''))
       } catch (error) {
-        console.warn('Airtable fetch failed', error)
-        markPricingFetchFailure('Airtable', error.message)
+        console.warn('Bootstrap fetch failed', error)
+        setLoadError(error.message)
+      } finally {
+        setIsLoading(false)
       }
     }
 
-    loadPricing()
+    loadData()
   }, [])
 
-  const persistClients = (nextClients, updatedIndexes = null) => {
-    const savedClients = saveClients(nextClients, availableProducts, updatedIndexes)
-    setClients(savedClients)
-    return savedClients
-  }
-
   const handleSaveClient = async (clientData) => {
-    let nextClients
-    let updatedIndexes
+    const payload = normalizeClient(clientData, availableProducts)
 
-    if (editingClientIndex !== null) {
-      nextClients = [...clients]
-      nextClients[editingClientIndex] = clientData
-      updatedIndexes = [editingClientIndex]
-    } else {
-      nextClients = [...clients, clientData]
-      updatedIndexes = [nextClients.length - 1]
-    }
+    try {
+      if (editingClientIndex !== null) {
+        const existingClient = clients[editingClientIndex]
+        const result = await updateRemoteClient(existingClient.id, payload)
+        setClients((currentClients) => currentClients.map((client, index) => (
+          index === editingClientIndex ? normalizeClient(result.client, availableProducts) : client
+        )))
+        setDetailClientId(result.client.id)
+      } else {
+        const result = await createRemoteClient(payload)
+        const nextClient = normalizeClient(result.client, availableProducts)
+        setClients((currentClients) => [...currentClients, nextClient])
+        setDetailClientId(nextClient.id)
+      }
 
-    const savedClients = persistClients(nextClients, updatedIndexes)
-    const savedClient = editingClientIndex !== null
-      ? savedClients[editingClientIndex]
-      : savedClients[savedClients.length - 1]
-
-    setView('dashboard')
-    setEditingClientIndex(null)
-
-    if (getAirtableConfig()) {
-      await syncClientToAirtable(savedClient)
+      setView('dashboard')
+      setEditingClientIndex(null)
+    } catch (error) {
+      window.alert(`Unable to save client: ${error.message}`)
     }
   }
 
   const handleEditClient = (index) => {
     setEditingClientIndex(index)
     setView('add_client')
+    setDetailClientId('')
     setMobileNavOpen(false)
+  }
+
+  const handleOpenDetail = (index) => {
+    const nextClient = clients[index]
+    if (!nextClient) {
+      return
+    }
+
+    setDetailClientId(nextClient.id)
   }
 
   const handleDuplicateClient = (index) => {
     const duplicated = createEmptyClient(availableProducts)
     const source = clients[index]
-    const nextClients = [
-      ...clients,
-      {
-        ...duplicated,
-        ...source,
-        retailerName: `${source.retailerName} (Copy)`,
-        createdAt: '',
-        updatedAt: '',
-      },
-    ]
-
-    persistClients(nextClients, [nextClients.length - 1])
+    void handleSaveClient({
+      ...duplicated,
+      ...source,
+      id: '',
+      products: (source.products || []).map((product) => ({ ...product, id: '' })),
+      retailerName: `${source.retailerName} (Copy)`,
+      createdAt: '',
+      updatedAt: '',
+    })
   }
 
-  const handleRemoveClient = (index) => {
+  const handleRemoveClient = async (index) => {
     if (!window.confirm('Are you sure you want to remove this retailer profile?')) {
       return
     }
 
-    const nextClients = clients.filter((_, clientIndex) => clientIndex !== index)
-    persistClients(nextClients, [])
+    try {
+      await deleteRemoteClient(clients[index].id)
+      setClients((currentClients) => currentClients.filter((_, clientIndex) => clientIndex !== index))
+      setSelectedClientIds((currentIds) => currentIds.filter((clientId) => clientId !== clients[index].id))
+      if (detailClientId === clients[index].id) {
+        setDetailClientId('')
+      }
+    } catch (error) {
+      window.alert(`Unable to delete client: ${error.message}`)
+    }
   }
 
-  const handleConvertLead = (index) => {
-    const nextClients = [...clients]
-    nextClients[index] = {
-      ...nextClients[index],
+  const handleConvertLead = async (index) => {
+    const nextClient = {
+      ...clients[index],
       pipelineStatus: 'Closed',
       winProbability: '100',
     }
-    persistClients(nextClients, [index])
+
+    try {
+      const result = await updateRemoteClient(nextClient.id, nextClient)
+      setClients((currentClients) => currentClients.map((client, clientIndex) => (
+        clientIndex === index ? normalizeClient(result.client, availableProducts) : client
+      )))
+      setDetailClientId(result.client.id)
+    } catch (error) {
+      window.alert(`Unable to convert lead: ${error.message}`)
+    }
   }
 
-  const handleUpdateClient = (index, updates) => {
-    const nextClients = [...clients]
-    nextClients[index] = { ...nextClients[index], ...updates }
-    persistClients(nextClients, [index])
+  const handleUpdateClient = async (index, updates) => {
+    const nextClient = { ...clients[index], ...updates }
+
+    try {
+      const result = await updateRemoteClient(nextClient.id, nextClient)
+      setClients((currentClients) => currentClients.map((client, clientIndex) => (
+        clientIndex === index ? normalizeClient(result.client, availableProducts) : client
+      )))
+      setDetailClientId(result.client.id)
+    } catch (error) {
+      window.alert(`Unable to update client: ${error.message}`)
+    }
   }
 
   const handleCancel = () => {
@@ -153,10 +189,118 @@ function App() {
 
   const handleFilterChange = (field, value) => {
     setFilters((currentFilters) => ({ ...currentFilters, [field]: value }))
+    setActiveSavedView('custom')
   }
 
   const handleClearFilters = () => {
     setFilters(DEFAULT_FILTERS)
+    setActiveSavedView('all')
+  }
+
+  const handleApplySavedView = (savedViewId) => {
+    const nextView = SAVED_VIEW_PRESETS.find((item) => item.id === savedViewId)
+    if (!nextView) {
+      return
+    }
+
+    setFilters(nextView.filters)
+    setActiveSavedView(nextView.id)
+  }
+
+  const handleToggleClientSelection = (clientId) => {
+    setSelectedClientIds((currentIds) => (
+      currentIds.includes(clientId)
+        ? currentIds.filter((id) => id !== clientId)
+        : [...currentIds, clientId]
+    ))
+  }
+
+  const handleClearSelection = () => {
+    setSelectedClientIds([])
+  }
+
+  const handleBulkUpdate = async (updates) => {
+    const nextIds = selectedClientIds
+
+    if (nextIds.length === 0) {
+      return
+    }
+
+    try {
+      const results = await Promise.all(nextIds.map(async (clientId) => {
+        const existingClient = clients.find((client) => client.id === clientId)
+
+        if (!existingClient) {
+          return null
+        }
+
+        const nextClient = {
+          ...existingClient,
+          ...updates,
+          ...(updates.pipelineStatus === 'Closed' ? { winProbability: '100' } : {}),
+        }
+
+        const result = await updateRemoteClient(clientId, nextClient)
+        return normalizeClient(result.client, availableProducts)
+      }))
+
+      const resultMap = new Map(results.filter(Boolean).map((client) => [client.id, client]))
+      setClients((currentClients) => currentClients.map((client) => resultMap.get(client.id) || client))
+      setSelectedClientIds([])
+    } catch (error) {
+      window.alert(`Unable to update selected accounts: ${error.message}`)
+    }
+  }
+
+  const handleCreateSignal = async (signalDraft) => {
+    try {
+      const result = await createRemoteSignal(signalDraft)
+      setSignals((currentSignals) => [result.signal, ...currentSignals])
+    } catch (error) {
+      window.alert(`Unable to create signal: ${error.message}`)
+    }
+  }
+
+  const handleUpdateSignal = async (signalId, nextSignal) => {
+    try {
+      const result = await updateRemoteSignal(signalId, nextSignal)
+      setSignals((currentSignals) => currentSignals.map((signal) => (
+        signal.id === signalId ? result.signal : signal
+      )))
+    } catch (error) {
+      window.alert(`Unable to update signal: ${error.message}`)
+    }
+  }
+
+  const handleCreateTask = async (taskDraft) => {
+    try {
+      const result = await createRemoteTask(taskDraft)
+      setTasks((currentTasks) => [...currentTasks, result.task].sort((left, right) => (
+        (left.dueDate || '9999-12-31').localeCompare(right.dueDate || '9999-12-31')
+      )))
+    } catch (error) {
+      window.alert(`Unable to create task: ${error.message}`)
+    }
+  }
+
+  const handleUpdateTask = async (taskId, nextTask) => {
+    try {
+      const result = await updateRemoteTask(taskId, nextTask)
+      setTasks((currentTasks) => currentTasks
+        .map((task) => (task.id === taskId ? result.task : task))
+        .sort((left, right) => (left.dueDate || '9999-12-31').localeCompare(right.dueDate || '9999-12-31')))
+    } catch (error) {
+      window.alert(`Unable to update task: ${error.message}`)
+    }
+  }
+
+  const handleOpenAccount = (accountId, accountName = '') => {
+    const matchingIndex = clients.findIndex((client) => (
+      (accountId && client.id === accountId) || (!accountId && client.retailerName === accountName)
+    ))
+    if (matchingIndex >= 0) {
+      handleOpenDetail(matchingIndex)
+    }
   }
 
   const filteredClients = filterClients(clients, filters)
@@ -168,10 +312,15 @@ function App() {
   const hasActiveFilters = Object.entries(filters).some(([, value]) => value !== '' && value !== 'all')
   const liveCount = clients.filter((client) => client.pipelineStatus === 'Closed').length
   const pipelineCount = clients.length - liveCount
+  const openSignalCount = signals.filter((signal) => signal.status !== 'Done').length
   const showFilters = view === 'dashboard' || view === 'placements'
+  const detailRecord = clients
+    .map((client, index) => ({ client, index }))
+    .find(({ client }) => client.id === detailClientId) || null
 
   const navigation = [
     { id: 'dashboard', label: 'Dashboard Overview', meta: `${liveCount} live` },
+    { id: 'command_center', label: 'Command Center', meta: `${openSignalCount} open` },
     { id: 'add_client', label: '+ Add New Retailer', meta: 'Deal builder' },
     { id: 'placements', label: 'Placements Forecast', meta: `${pipelineCount} pipeline` },
     { id: 'settings', label: 'Settings', meta: 'Airtable + catalogue' },
@@ -241,24 +390,70 @@ function App() {
             filteredCount={filteredClients.length}
             totalCount={clients.length}
             options={filterOptions}
+            savedViews={SAVED_VIEW_PRESETS}
+            activeSavedView={activeSavedView}
+            onApplySavedView={handleApplySavedView}
             onChange={handleFilterChange}
             onClear={handleClearFilters}
           />
         )}
 
         <main className="main-content">
-          {view === 'dashboard' && (
-            <DashboardOverview
-              clientRecords={filteredRecords}
-              totalCount={clients.length}
-              hasActiveFilters={hasActiveFilters}
-              onEdit={handleEditClient}
-              onDuplicate={handleDuplicateClient}
-              onRemove={handleRemoveClient}
+          {isLoading && (
+            <div className="glass-card">
+              <p className="eyebrow">Loading</p>
+              <h2>Syncing shared Airtable data</h2>
+              <p className="view-header__copy">We are loading clients, products, and pricing from the shared production data source.</p>
+            </div>
+          )}
+
+          {!isLoading && loadError && (
+            <div className="glass-card">
+              <p className="eyebrow">Connection issue</p>
+              <h2>Unable to load Airtable data</h2>
+              <p className="view-header__copy">{loadError}</p>
+            </div>
+          )}
+
+          {!isLoading && !loadError && view === 'dashboard' && (
+            <>
+              <MorningBriefing
+                clients={clients}
+                signals={signals}
+                tasks={tasks}
+                onOpenAccount={handleOpenAccount}
+                clientRecords={filteredRecords}
+              />
+              <DashboardOverview
+                clientRecords={filteredRecords}
+                totalCount={clients.length}
+                hasActiveFilters={hasActiveFilters}
+                onEdit={handleEditClient}
+                onOpenDetail={handleOpenDetail}
+                onDuplicate={handleDuplicateClient}
+                onRemove={handleRemoveClient}
+                onBulkUpdate={handleBulkUpdate}
+                selectedClientIds={selectedClientIds}
+                onToggleClientSelection={handleToggleClientSelection}
+                onClearSelection={handleClearSelection}
+              />
+            </>
+          )}
+
+          {!isLoading && !loadError && view === 'command_center' && (
+            <CommandCenter
+              clients={clients}
+              signals={signals}
+              tasks={tasks}
+              onCreateSignal={handleCreateSignal}
+              onUpdateSignal={handleUpdateSignal}
+              onCreateTask={handleCreateTask}
+              onUpdateTask={handleUpdateTask}
+              onOpenAccount={handleOpenAccount}
             />
           )}
 
-          {view === 'add_client' && (
+          {!isLoading && !loadError && view === 'add_client' && (
             <ClientForm
               onSave={handleSaveClient}
               onCancel={handleCancel}
@@ -267,7 +462,7 @@ function App() {
             />
           )}
 
-          {view === 'placements' && (
+          {!isLoading && !loadError && view === 'placements' && (
             <PlacementsForecast
               clientRecords={filteredRecords}
               totalCount={clients.length}
@@ -279,13 +474,23 @@ function App() {
             />
           )}
 
-          {view === 'settings' && (
+          {!isLoading && view === 'settings' && (
             <Settings
               onProductsUpdated={(products) => setAvailableProducts(products)}
             />
           )}
         </main>
       </div>
+
+      <AccountDetailPanel
+        record={detailRecord}
+        onClose={() => setDetailClientId('')}
+        onEdit={handleEditClient}
+        onDuplicate={handleDuplicateClient}
+        onRemove={handleRemoveClient}
+        onConvert={handleConvertLead}
+        onUpdateClient={handleUpdateClient}
+      />
     </div>
   )
 }
