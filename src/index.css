@@ -234,10 +234,7 @@ small {
 }
 
 .portfolio-filters {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  padding-top: 1.4rem;
+  padding-top: 0;
 }
 
 .portfolio-filters::after {
@@ -246,6 +243,29 @@ small {
   inset: 0 2rem auto;
   height: 100%;
   pointer-events: none;
+}
+
+.filter-toggle-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 0;
+}
+
+.filter-toggle-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.filter-toggle-bar__left .eyebrow {
+  margin-bottom: 0;
+}
+
+.filter-toggle-bar .meta-pill {
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.74rem;
 }
 
 .main-content {
@@ -684,6 +704,102 @@ textarea.form-input::placeholder {
   min-width: 760px;
   border-collapse: separate;
   border-spacing: 0;
+}
+
+.command-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.command-table th:nth-child(1),
+.command-table td:nth-child(1) {
+  width: 32%;
+  word-break: break-word;
+}
+
+.command-table th:nth-child(2),
+.command-table td:nth-child(2) {
+  width: 18%;
+}
+
+.command-table th:nth-child(3),
+.command-table td:nth-child(3) {
+  width: 12%;
+}
+
+.command-table th:nth-child(4),
+.command-table td:nth-child(4) {
+  width: 12%;
+}
+
+.command-table th:nth-child(5),
+.command-table td:nth-child(5) {
+  width: 14%;
+}
+
+.command-table th:nth-child(6),
+.command-table td:nth-child(6) {
+  width: 12%;
+}
+
+.command-card-list {
+  display: none;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.command-card {
+  padding: 1rem;
+  border: 1px solid var(--border-light);
+  background: var(--huel-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.command-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.command-card__header strong {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.command-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.command-card__meta-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--huel-mid-gray);
+}
+
+.command-card__meta-item strong {
+  color: var(--huel-ink);
+  font-size: 0.82rem;
+}
+
+.command-card__detail {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--huel-mid-gray);
+}
+
+.command-card__actions {
+  display: flex;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
 }
 
 .dashboard-table thead th {
@@ -1522,6 +1638,11 @@ textarea.form-input::placeholder {
   .briefing-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .command-table th:first-child,
+  .command-table td:first-child {
+    position: static;
+  }
 }
 
 @media (max-width: 900px) {
@@ -1602,8 +1723,7 @@ textarea.form-input::placeholder {
   }
 
   .portfolio-filters {
-    top: 4.8rem;
-    padding-top: 1rem;
+    padding-top: 0.5rem;
   }
 
   .portfolio-filters__header,
@@ -1669,6 +1789,51 @@ textarea.form-input::placeholder {
   .activity-form__type {
     width: 100%;
   }
+
+  /* Command Center: show cards, hide tables */
+  .command-table-desktop {
+    display: none;
+  }
+
+  .command-card-list {
+    display: flex;
+  }
+
+  /* Detail panel: full width on mobile */
+  .detail-panel {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  /* Bulk action toolbar: stack */
+  .bulk-action-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bulk-action-toolbar__actions {
+    flex-direction: column;
+  }
+
+  /* Morning briefing action items */
+  .briefing-action-item {
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .briefing-action-item .btn {
+    align-self: flex-start;
+  }
+
+  /* Better tap targets */
+  .btn {
+    min-height: 2.6rem;
+    font-size: 0.84rem;
+  }
+
+  .sidebar-nav__button {
+    padding: 1.1rem 1.2rem;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1711,5 +1876,37 @@ textarea.form-input::placeholder {
   .dashboard-table th,
   .dashboard-table td {
     padding: 0.8rem 0.75rem;
+  }
+
+  .briefing-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .morning-briefing__header {
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .morning-briefing__header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .detail-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filter-toggle-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+  }
+
+  h2 {
+    font-size: 1.15rem;
   }
 }

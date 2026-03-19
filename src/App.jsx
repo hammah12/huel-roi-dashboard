@@ -51,6 +51,7 @@ function App() {
   const [detailClientId, setDetailClientId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [filtersVisible, setFiltersVisible] = useState(true)
 
   useEffect(() => {
     async function loadData() {
@@ -385,17 +386,37 @@ function App() {
         </header>
 
         {showFilters && (
-          <PortfolioFilters
-            filters={filters}
-            filteredCount={filteredClients.length}
-            totalCount={clients.length}
-            options={filterOptions}
-            savedViews={SAVED_VIEW_PRESETS}
-            activeSavedView={activeSavedView}
-            onApplySavedView={handleApplySavedView}
-            onChange={handleFilterChange}
-            onClear={handleClearFilters}
-          />
+          <div className="portfolio-filters">
+            <div className="filter-toggle-bar">
+              <div className="filter-toggle-bar__left">
+                <p className="eyebrow">Portfolio Filters</p>
+                <span className="meta-pill">
+                  {filteredClients.length} of {clients.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setFiltersVisible((v) => !v)}
+              >
+                {filtersVisible ? 'Hide filters' : 'Show filters'}
+              </button>
+            </div>
+
+            {filtersVisible && (
+              <PortfolioFilters
+                filters={filters}
+                filteredCount={filteredClients.length}
+                totalCount={clients.length}
+                options={filterOptions}
+                savedViews={SAVED_VIEW_PRESETS}
+                activeSavedView={activeSavedView}
+                onApplySavedView={handleApplySavedView}
+                onChange={handleFilterChange}
+                onClear={handleClearFilters}
+              />
+            )}
+          </div>
         )}
 
         <main className="main-content">

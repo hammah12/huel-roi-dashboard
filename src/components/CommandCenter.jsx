@@ -306,8 +306,9 @@ export default function CommandCenter({
             </div>
           </div>
 
-          <div className="table-shell">
-            <table className="dashboard-table">
+          {/* Desktop table */}
+          <div className="table-shell command-table-desktop">
+            <table className="dashboard-table command-table">
               <thead>
                 <tr>
                   <th>Signal</th>
@@ -347,6 +348,37 @@ export default function CommandCenter({
               </tbody>
             </table>
           </div>
+
+          {/* Mobile card list */}
+          <div className="command-card-list">
+            {signals.length === 0 ? (
+              <p className="empty-copy">Add the optional Airtable `Signals` table to start tracking commercial signals here.</p>
+            ) : signals.map((signal) => (
+              <div key={`card-${signal.id}`} className="command-card">
+                <div className="command-card__header">
+                  <strong>{signal.title}</strong>
+                  <TonePill label={signal.priority} tone={getSignalTone(signal.priority)} />
+                </div>
+                {(signal.whyItMatters || signal.source) && (
+                  <p className="command-card__detail">{signal.whyItMatters || signal.source}</p>
+                )}
+                <div className="command-card__meta">
+                  <span className="command-card__meta-item">
+                    <button type="button" className="table-link-button" onClick={() => onOpenAccount(signal.accountId, signal.accountName)}>
+                      {signal.accountName || 'Unlinked'}
+                    </button>
+                  </span>
+                  <span className="command-card__meta-item">{signal.status}</span>
+                  <span className="command-card__meta-item">{signal.dueDate ? formatShortDate(signal.dueDate) : 'No date'}</span>
+                </div>
+                <div className="command-card__actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => onUpdateSignal(signal.id, { ...signal, status: signal.status === 'Done' ? 'Reviewing' : 'Done' })}>
+                    {signal.status === 'Done' ? 'Reopen' : 'Done'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </article>
 
         <article className="glass-card">
@@ -357,8 +389,9 @@ export default function CommandCenter({
             </div>
           </div>
 
-          <div className="table-shell">
-            <table className="dashboard-table">
+          {/* Desktop table */}
+          <div className="table-shell command-table-desktop">
+            <table className="dashboard-table command-table">
               <thead>
                 <tr>
                   <th>Task</th>
@@ -397,6 +430,37 @@ export default function CommandCenter({
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile card list */}
+          <div className="command-card-list">
+            {tasks.length === 0 ? (
+              <p className="empty-copy">Add the optional Airtable `Tasks` table to start managing commercial execution work here.</p>
+            ) : tasks.map((task) => (
+              <div key={`card-${task.id}`} className="command-card">
+                <div className="command-card__header">
+                  <strong>{task.title}</strong>
+                  <TonePill label={task.priority} tone={task.priority === 'High' ? 'danger' : task.priority === 'Medium' ? 'warning' : 'neutral'} />
+                </div>
+                {(task.notes || task.signalLabel) && (
+                  <p className="command-card__detail">{task.notes || task.signalLabel}</p>
+                )}
+                <div className="command-card__meta">
+                  <span className="command-card__meta-item">
+                    <button type="button" className="table-link-button" onClick={() => onOpenAccount(task.accountId, task.accountName)}>
+                      {task.accountName || 'Unlinked'}
+                    </button>
+                  </span>
+                  <span className="command-card__meta-item">{task.status}</span>
+                  <span className="command-card__meta-item">{task.dueDate ? formatShortDate(task.dueDate) : 'No date'}</span>
+                </div>
+                <div className="command-card__actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => onUpdateTask(task.id, { ...task, status: task.status === 'Done' ? 'To Do' : 'Done' })}>
+                    {task.status === 'Done' ? 'Reopen' : 'Done'}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </article>
       </section>
