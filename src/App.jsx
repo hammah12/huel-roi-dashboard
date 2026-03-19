@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AccountDetailPanel from './components/AccountDetailPanel'
+import ActivityTimeline from './components/ActivityTimeline'
 import CommandCenter from './components/CommandCenter'
 import DashboardOverview from './components/DashboardOverview'
 import ClientForm from './components/ClientForm'
@@ -320,11 +321,12 @@ function App() {
     .find(({ client }) => client.id === detailClientId) || null
 
   const navigation = [
-    { id: 'dashboard', label: 'Dashboard Overview', meta: `${liveCount} live` },
-    { id: 'command_center', label: 'Command Center', meta: `${openSignalCount} open` },
-    { id: 'add_client', label: '+ Add New Retailer', meta: 'Deal builder' },
-    { id: 'placements', label: 'Placements Forecast', meta: `${pipelineCount} pipeline` },
-    { id: 'settings', label: 'Settings', meta: 'Airtable + catalogue' },
+    { id: 'dashboard',       label: 'Dashboard Overview',  meta: `${liveCount} live` },
+    { id: 'command_center',  label: 'Command Center',      meta: `${openSignalCount} open` },
+    { id: 'timeline',        label: 'Activity Timeline',   meta: `${signals.length + tasks.length} events` },
+    { id: 'add_client',      label: '+ Add New Retailer',  meta: 'Deal builder' },
+    { id: 'placements',      label: 'Placements Forecast', meta: `${pipelineCount} pipeline` },
+    { id: 'settings',        label: 'Settings',            meta: 'Airtable + catalogue' },
   ]
 
   return (
@@ -471,6 +473,13 @@ function App() {
               onCreateTask={handleCreateTask}
               onUpdateTask={handleUpdateTask}
               onOpenAccount={handleOpenAccount}
+            />
+          )}
+
+          {!isLoading && !loadError && view === 'timeline' && (
+            <ActivityTimeline
+              signals={signals}
+              tasks={tasks}
             />
           )}
 

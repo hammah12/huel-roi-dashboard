@@ -5,6 +5,26 @@ import {
   formatShortDate,
 } from '../utils/formatters'
 
+// ── Signal metadata parser ────────────────────────────────────────────────────
+// Strips [Score: N] prefix and \nFrom: email suffix written by the command center
+function parseSignalMeta(whyItMatters = '') {
+  const scoreMatch  = whyItMatters.match(/^\[Score:\s*(\d+)\]/)
+  const score       = scoreMatch ? parseInt(scoreMatch[1], 10) : null
+  const fromMatch   = whyItMatters.match(/\nFrom:\s*(.+)$/)
+  const sender      = fromMatch ? fromMatch[1].trim() : null
+  const body        = whyItMatters
+    .replace(/^\[Score:\s*\d+\]\s*/, '')
+    .replace(/\nFrom:\s*.+$/, '')
+    .trim()
+  return { score, sender, body }
+}
+
+function ScoreBadge({ score }) {
+  if (score === null || score === undefined) return null
+  const tone = score >= 70 ? 'success' : score >= 40 ? 'warning' : 'neutral'
+  return <span className={`tone-pill tone-pill--${tone}`} title="Signal confidence score">⚡ {score}</span>
+}
+
 const EMPTY_SIGNAL = {
   title: '',
   accountId: '',
@@ -78,8 +98,13 @@ export default function CommandCenter({
   onUpdateTask,
   onOpenAccount,
 }) {
-  const [signalDraft, setSignalDraft] = useState(EMPTY_SIGNAL)
-  const [taskDraft, setTaskDraft] = useState(EMPTY_TASK)
+  const [signalDraft, setSignalDraft]   = useState(EMPTY_SIGNAL)
+  const [taskDraft, setTaskDraft]       = useState(EMPTY_TASK)
+  const [showArchived, setShowArchived] = useState(false)
+
+  const activeSignals   = signals.filter((s) => s.status !== 'Done')
+  const archivedCount   = signals.length - activeSignals.length
+  const displaySignals  = showArchived ? signals : activeSignals
 
   const todayQueue = [
     ...signals
@@ -304,6 +329,19 @@ export default function CommandCenter({
               <p className="eyebrow">Signals</p>
               <h2>Inbound and commercial developments</h2>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <TonePill label={`${activeSignals.length} active`} tone={activeSignals.length ? 'info' : 'neutral'} />
+              {archivedCount > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+                  onClick={() => setShowArchived((v) => !v)}
+                >
+                  {showArchived ? `Hide archived (${archivedCount})` : `Show archived (${archivedCount})`}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Desktop table */}
@@ -320,64 +358,86 @@ export default function CommandCenter({
                 </tr>
               </thead>
               <tbody>
-                {signals.length === 0 ? (
+                {displaySignals.length === 0 ? (
                   <tr>
-                    <td colSpan="6">Add the optional Airtable `Signals` table to start tracking commercial signals here.</td>
+                    <td colSpan="6">{signals.length === 0 ? 'Add the optional Airtable Signals table to start tracking commercial signals here.' : 'No active signals — all caught up! Click "Show archived" to see resolved items.'}</td>
                   </tr>
-                ) : signals.map((signal) => (
-                  <tr key={signal.id}>
-                    <td>
-                      <strong>{signal.title}</strong>
-                      <small>{signal.whyItMatters || signal.source}</small>
-                    </td>
-                    <td>
-                      <button type="button" className="table-link-button" onClick={() => onOpenAccount(signal.accountId, signal.accountName)}>
-                        {signal.accountName || 'Unlinked'}
-                      </button>
-                    </td>
-                    <td>{signal.status}</td>
-                    <td><TonePill label={signal.priority} tone={getSignalTone(signal.priority)} /></td>
-                    <td>{signal.dueDate ? formatShortDate(signal.dueDate) : 'No date'}</td>
-                    <td>
-                      <button type="button" className="btn btn-secondary" onClick={() => onUpdateSignal(signal.id, { ...signal, status: signal.status === 'Done' ? 'Reviewing' : 'Done' })}>
-                        {signal.status === 'Done' ? 'Reopen' : 'Done'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                ) : displaySignals.map((signal) => {
+                  const { score, sender, body } = parseSignalMeta(signal.whyItMatters)
+                  const isGmail = signal.source === 'Gmail Inbound'
+                  return (
+                    <tr key={signal.id} style={{ opacity: signal.status === 'Done' ? 0.6 : 1 }}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.2rem' }}>
+                          <strong>{signal.title}</strong>
+                          {isGmail && <span className="tone-pill tone-pill--info" style={{ fontSize: '0.68rem' }}>Gmail</span>}
+                        </div>
+                        {body && <small style={{ color: 'var(--text-muted)' }}>{body.length > 90 ? `${body.slice(0, 90)}…` : body}</small>}
+                        {sender && <small style={{ display: 'block', color: 'var(--text-muted)', opacity: 0.75 }}>↩ {sender}</small>}
+                      </td>
+                      <td>
+                        <button type="button" className="table-link-button" onClick={() => onOpenAccount(signal.accountId, signal.accountName)}>
+                          {signal.accountName || 'Unlinked'}
+                        </button>
+                      </td>
+                      <td>{signal.status}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+                          <TonePill label={signal.priority} tone={getSignalTone(signal.priority)} />
+                          <ScoreBadge score={score} />
+                        </div>
+                      </td>
+                      <td>{signal.dueDate ? formatShortDate(signal.dueDate) : 'No date'}</td>
+                      <td>
+                        <button type="button" className="btn btn-secondary" onClick={() => onUpdateSignal(signal.id, { ...signal, status: signal.status === 'Done' ? 'New' : 'Done' })}>
+                          {signal.status === 'Done' ? 'Reopen' : 'Done'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
 
           {/* Mobile card list */}
           <div className="command-card-list">
-            {signals.length === 0 ? (
-              <p className="empty-copy">Add the optional Airtable `Signals` table to start tracking commercial signals here.</p>
-            ) : signals.map((signal) => (
-              <div key={`card-${signal.id}`} className="command-card">
-                <div className="command-card__header">
-                  <strong>{signal.title}</strong>
-                  <TonePill label={signal.priority} tone={getSignalTone(signal.priority)} />
-                </div>
-                {(signal.whyItMatters || signal.source) && (
-                  <p className="command-card__detail">{signal.whyItMatters || signal.source}</p>
-                )}
-                <div className="command-card__meta">
-                  <span className="command-card__meta-item">
-                    <button type="button" className="table-link-button" onClick={() => onOpenAccount(signal.accountId, signal.accountName)}>
-                      {signal.accountName || 'Unlinked'}
+            {displaySignals.length === 0 ? (
+              <p className="empty-copy">{signals.length === 0 ? 'Add the optional Airtable Signals table to track signals here.' : 'No active signals — all caught up!'}</p>
+            ) : displaySignals.map((signal) => {
+              const { score, sender, body } = parseSignalMeta(signal.whyItMatters)
+              const isGmail = signal.source === 'Gmail Inbound'
+              return (
+                <div key={`card-${signal.id}`} className="command-card" style={{ opacity: signal.status === 'Done' ? 0.65 : 1 }}>
+                  <div className="command-card__header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <strong>{signal.title}</strong>
+                      {isGmail && <span className="tone-pill tone-pill--info" style={{ fontSize: '0.68rem' }}>Gmail</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.3rem' }}>
+                      <TonePill label={signal.priority} tone={getSignalTone(signal.priority)} />
+                      <ScoreBadge score={score} />
+                    </div>
+                  </div>
+                  {body && <p className="command-card__detail">{body.length > 120 ? `${body.slice(0, 120)}…` : body}</p>}
+                  {sender && <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: '0.2rem' }}>↩ {sender}</small>}
+                  <div className="command-card__meta">
+                    <span className="command-card__meta-item">
+                      <button type="button" className="table-link-button" onClick={() => onOpenAccount(signal.accountId, signal.accountName)}>
+                        {signal.accountName || 'Unlinked'}
+                      </button>
+                    </span>
+                    <span className="command-card__meta-item">{signal.status}</span>
+                    <span className="command-card__meta-item">{signal.dueDate ? formatShortDate(signal.dueDate) : 'No date'}</span>
+                  </div>
+                  <div className="command-card__actions">
+                    <button type="button" className="btn btn-secondary" onClick={() => onUpdateSignal(signal.id, { ...signal, status: signal.status === 'Done' ? 'New' : 'Done' })}>
+                      {signal.status === 'Done' ? 'Reopen' : 'Done'}
                     </button>
-                  </span>
-                  <span className="command-card__meta-item">{signal.status}</span>
-                  <span className="command-card__meta-item">{signal.dueDate ? formatShortDate(signal.dueDate) : 'No date'}</span>
+                  </div>
                 </div>
-                <div className="command-card__actions">
-                  <button type="button" className="btn btn-secondary" onClick={() => onUpdateSignal(signal.id, { ...signal, status: signal.status === 'Done' ? 'Reviewing' : 'Done' })}>
-                    {signal.status === 'Done' ? 'Reopen' : 'Done'}
-                  </button>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </article>
 
